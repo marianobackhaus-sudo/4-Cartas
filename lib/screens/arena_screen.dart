@@ -425,6 +425,9 @@ class _ArenaScreenState extends State<ArenaScreen> {
   int? _swapOwnSlot;          // J/Q: selected own slot
   List<_KingTarget> _kingTargets = [];   // K: peeked targets (1 own + 1 opponent)
 
+  // ── espejo penalty ────────────────────────────────────────────────────────────
+  int _playerPenalty = 0;
+
   // ── match (best of 3 partidas) ────────────────────────────────────────────────
   int _playerPartidaWins = 0;
   int _opponentPartidaWins = 0;
@@ -501,6 +504,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
       _revealOpponentSlot = null;
       _isOpponentTurn = false;
       _partidaOver = false;
+      _playerPenalty = 0;
     });
   }
 
@@ -531,7 +535,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
   // Ends the current partida, scores it, checks match result.
   void _endPartida() {
     _opponentTimer?.cancel();
-    final playerScore = _playerCards.fold(0, (sum, c) => sum + c.value);
+    final playerScore = _playerCards.fold(0, (sum, c) => sum + c.value) + _playerPenalty;
     final opponentScore = _opponentCards.fold(0, (sum, c) => sum + c.value);
     int newPlayerWins = _playerPartidaWins;
     int newOpponentWins = _opponentPartidaWins;
@@ -746,6 +750,48 @@ class _ArenaScreenState extends State<ArenaScreen> {
     _endPlayerTurn();
   }
 
+  // ── Mirror (Espejo) ──────────────────────────────────────────────────────────
+  void _handleMirror() {
+    if (_phase != _Phase.turn || _isOpponentTurn || _discardStack.isEmpty) return;
+    final topCard = _discardStack.last.card;
+    final matchIndices = <int>[];
+    for (int i = 0; i < _playerCards.length; i++) {
+      final c = _playerCards[i];
+      final matches = topCard.isJoker ? c.isJoker : (!c.isJoker && c.rank == topCard.rank);
+      if (matches) matchIndices.add(i);
+    }
+    if (matchIndices.isEmpty) {
+      setState(() => _playerPenalty += 5);
+      _showBanner('¡FALLASTE!', '+5 puntos de penalidad', AppColors.danger);
+      _endPlayerTurn();
+    } else {
+      final newCards = [
+        for (int i = 0; i < _playerCards.length; i++)
+          if (!matchIndices.contains(i)) _playerCards[i],
+      ];
+      final newDiscard = [
+        ..._discardStack,
+        for (final i in matchIndices) _DiscardEntry(_playerCards[i], _rAngle(), _rOffset()),
+      ];
+      setState(() {
+        _playerCards = newCards;
+        _discardStack = newDiscard;
+      });
+      if (newCards.isEmpty) {
+        _showBanner('¡ESPEJO! Sin cartas', 'Última vuelta del rival', AppColors.success);
+        _opponentTimer?.cancel();
+        setState(() => _isOpponentTurn = true);
+        _opponentTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted) { setState(() => _isOpponentTurn = false); _endPartida(); }
+        });
+      } else {
+        final n = matchIndices.length;
+        _showBanner('¡ESPEJO!', '$n carta${n > 1 ? 's' : ''} al descarte', AppColors.success);
+        _endPlayerTurn();
+      }
+    }
+  }
+
   // ── Exit confirmation ────────────────────────────────────────────────────────
   void _confirmExit(BuildContext context) {
     showDialog(
@@ -930,7 +976,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
                 phase: _phase,
                 isOpponentTurn: _isOpponentTurn,
                 onCut: _handleCut,
-                onMirror: () {},
+                onMirror: _handleMirror,
                 onKingSwap: () => _kingDecide(true),
                 onKingKeep: () => _kingDecide(false),
               ),
