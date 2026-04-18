@@ -31,7 +31,7 @@ GoRouter createRouter() {
   final authListenable = _AuthListenable();
 
   return GoRouter(
-    initialLocation: '/',
+    initialLocation: '/login',
     refreshListenable: authListenable,
     redirect: (context, state) {
       final isLoggedIn = FirebaseAuth.instance.currentUser != null;
