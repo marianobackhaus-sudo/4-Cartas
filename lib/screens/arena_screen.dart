@@ -959,7 +959,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
     final playerKingPeeked = _kingTargets.where((t) => t.isOwn).map((t) => t.slot).toSet();
     final swapOpponent = _phase == _Phase.powerSwapSelectOpponent;
 
-    return Scaffold(
+    return Stack(children: [
+    Scaffold(
       backgroundColor: AppColors.bgDeepest,
       appBar: AppBar(
         backgroundColor: AppColors.bgDeepest,
@@ -1060,24 +1061,25 @@ class _ArenaScreenState extends State<ArenaScreen> {
             color: _bannerColor,
           ),
         ),
-        // Partida over overlay
-        if (_partidaOver)
-          Positioned.fill(
-            child: _GameOverOverlay(
-              playerCards: _playerCards,
-              opponentCards: _opponentCards,
-              playerPartidaWins: _playerPartidaWins,
-              opponentPartidaWins: _opponentPartidaWins,
-              currentPartida: _currentPartida,
-              matchOver: _matchOver,
-              playerPenalty: _playerPenalty,
-              onNextPartida: _startNextPartida,
-              onNewMatch: _initFullMatch,
-              onExit: () => Navigator.of(context).pop(),
-            ),
-          ),
       ]),
-    );
+    ),
+    // Game over overlay sits above the full Scaffold (incl. AppBar)
+    if (_partidaOver)
+      Positioned.fill(
+        child: _GameOverOverlay(
+          playerCards: _playerCards,
+          opponentCards: _opponentCards,
+          playerPartidaWins: _playerPartidaWins,
+          opponentPartidaWins: _opponentPartidaWins,
+          currentPartida: _currentPartida,
+          matchOver: _matchOver,
+          playerPenalty: _playerPenalty,
+          onNextPartida: _startNextPartida,
+          onNewMatch: _initFullMatch,
+          onExit: () => Navigator.of(context).pop(),
+        ),
+      ),
+    ]);
   }
 }
 
