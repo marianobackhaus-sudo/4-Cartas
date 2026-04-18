@@ -1024,6 +1024,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
               opponentPartidaWins: _opponentPartidaWins,
               currentPartida: _currentPartida,
               matchOver: _matchOver,
+              playerPenalty: _playerPenalty,
               onNextPartida: _startNextPartida,
               onNewMatch: _initFullMatch,
               onExit: () => Navigator.of(context).pop(),
@@ -1076,6 +1077,7 @@ class _GameOverOverlay extends StatelessWidget {
   final int opponentPartidaWins;
   final int currentPartida;
   final bool matchOver;
+  final int playerPenalty;
   final VoidCallback onNextPartida;
   final VoidCallback onNewMatch;
   final VoidCallback onExit;
@@ -1084,6 +1086,7 @@ class _GameOverOverlay extends StatelessWidget {
     required this.playerCards, required this.opponentCards,
     required this.playerPartidaWins, required this.opponentPartidaWins,
     required this.currentPartida, required this.matchOver,
+    required this.playerPenalty,
     required this.onNextPartida, required this.onNewMatch, required this.onExit,
   });
 
@@ -1111,7 +1114,7 @@ class _GameOverOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final playerScore = _score(playerCards);
+    final playerScore = _score(playerCards) + playerPenalty;
     final opponentScore = _score(opponentCards);
     final playerWinsPartida = playerScore < opponentScore;
     final tied = playerScore == opponentScore;
