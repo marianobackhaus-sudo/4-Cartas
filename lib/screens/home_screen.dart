@@ -15,33 +15,11 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  final _nicknameController = TextEditingController();
-  final _focusNode = FocusNode();
-  bool _showNicknameError = false;
+  // TODO: replace with real user from backend
+  static const _mockNickname = 'lucas';
+
   bool _busy = false;
   String? _busyError;
-
-  @override
-  void initState() {
-    super.initState();
-    _nicknameController.addListener(() {
-      if (_showNicknameError && _nicknameController.text.trim().isNotEmpty) {
-        setState(() => _showNicknameError = false);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _nicknameController.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  String? get _nickname {
-    final v = _nicknameController.text.trim();
-    return v.isEmpty ? null : v;
-  }
 
   Future<void> _withBusy(Future<void> Function() op) async {
     setState(() {
@@ -58,38 +36,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Future<void> _onCrear() async {
-    final nick = _nickname;
-    if (nick == null) {
-      setState(() => _showNicknameError = true);
-      _focusNode.requestFocus();
-      return;
-    }
     await _withBusy(() async {
       final uid = await ref.read(currentUserIdProvider.future);
       final room = await ref
           .read(roomRepositoryProvider)
-          .createRoom(hostUid: uid, hostNickname: nick);
-      ref.read(nicknameProvider.notifier).state = nick;
+          .createRoom(hostUid: uid, hostNickname: _mockNickname);
+      ref.read(nicknameProvider.notifier).state = _mockNickname;
       if (mounted) context.go('/lobby/${room.roomCode}');
     });
   }
 
   void _onUnirse() {
-    final nick = _nickname;
-    if (nick == null) {
-      setState(() => _showNicknameError = true);
-      _focusNode.requestFocus();
-      return;
-    }
-    FocusScope.of(context).unfocus();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _JoinSheet(
-        nickname: nick,
+        nickname: _mockNickname,
         onJoin: (code) async {
-          await _joinByCode(nick, code);
+          await _joinByCode(_mockNickname, code);
         },
       ),
     );
@@ -150,12 +115,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.xl5),
-                  _NicknameField(
-                    controller: _nicknameController,
-                    focusNode: _focusNode,
-                    showError: _showNicknameError,
-                    enabled: !_busy,
-                  ),
+                  const _WelcomeHeader(),
                   const SizedBox(height: AppSpacing.xl),
                   _HomeButton(
                     label: 'CREAR PARTIDA',
@@ -368,6 +328,38 @@ class _CodeField extends StatelessWidget {
             style: AppText.caption.copyWith(color: AppColors.danger),
           ),
         ],
+      ],
+    );
+  }
+}
+
+// ─── Welcome Header ───────────────────────────────────────────────────────────
+
+class _WelcomeHeader extends StatelessWidget {
+  const _WelcomeHeader();
+
+  // TODO: replace 'lucas' with real user from backend
+  static const _name = 'lucas';
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          'BIENVENIDO DE VUELTA',
+          style: AppText.label.copyWith(letterSpacing: 2),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          _name.toUpperCase(),
+          style: AppText.title.copyWith(
+            color: AppColors.primary,
+            letterSpacing: 3,
+          ),
+          textAlign: TextAlign.center,
+        ),
       ],
     );
   }
