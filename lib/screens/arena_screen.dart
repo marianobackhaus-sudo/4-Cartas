@@ -193,7 +193,27 @@ class _CardBack extends StatelessWidget {
           ? Center(child: Icon(Icons.visibility_outlined, color: eyeColor, size: width * .46))
           : selected
               ? Center(child: Icon(Icons.swap_horiz_rounded, color: AppColors.primary, size: width * .46))
-              : null,
+              : Padding(
+                  padding: EdgeInsets.all(width * 0.09),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(AppRadius.xs),
+                      border: Border.all(
+                        color: AppColors.cardBackPattern.withValues(alpha: 0.40),
+                        width: 1.0,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text('♦',
+                        style: TextStyle(
+                          color: AppColors.cardBackPattern.withValues(alpha: 0.45),
+                          fontSize: width * 0.22,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
     );
   }
 }
