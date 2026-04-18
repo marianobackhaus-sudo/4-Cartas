@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/design_tokens.dart';
@@ -99,10 +100,9 @@ void _showSignOutDialog(BuildContext context, WidgetRef ref) {
 class PerfilScreen extends ConsumerWidget {
   const PerfilScreen({super.key});
 
-  static const String _username = 'NEON_DRIFTER';
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final username = FirebaseAuth.instance.currentUser?.displayName ?? '—';
     return Scaffold(
       backgroundColor: AppColors.bgDeepest,
       appBar: AppBar(
@@ -140,8 +140,8 @@ class PerfilScreen extends ConsumerWidget {
                 const SizedBox(height: AppSpacing.xl2),
                 const Center(child: _AvatarCircle()),
                 const SizedBox(height: AppSpacing.base),
-                const Text(
-                  _username,
+                Text(
+                  username,
                   style: AppText.headline,
                   textAlign: TextAlign.center,
                 ),

@@ -9,6 +9,7 @@ import 'screens/game_screen.dart';
 import 'screens/lobby_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
+import 'screens/setup_profile_screen.dart';
 import 'screens/match_result_screen.dart';
 
 class _AuthListenable extends ChangeNotifier {
@@ -35,15 +36,20 @@ GoRouter createRouter() {
     refreshListenable: authListenable,
     redirect: (context, state) {
       final isLoggedIn = FirebaseAuth.instance.currentUser != null;
-      final isLoginRoute = state.matchedLocation == '/login';
-      if (!isLoggedIn && !isLoginRoute) return '/login';
-      if (isLoggedIn && isLoginRoute) return '/';
+      final loc = state.matchedLocation;
+      final isPublic = loc == '/login' || loc == '/setup-profile';
+      if (!isLoggedIn && !isPublic) return '/login';
+      if (isLoggedIn && loc == '/login') return '/';
       return null;
     },
     routes: [
       GoRoute(
         path: '/login',
         builder: (_, _) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: '/setup-profile',
+        builder: (_, _) => const SetupProfileScreen(),
       ),
       GoRoute(
         path: '/',

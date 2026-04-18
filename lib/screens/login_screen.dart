@@ -56,10 +56,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       final password = _passwordController.text;
       if (_isRegister) {
         await repo.registerWithEmail(email, password);
+        if (mounted) context.go('/setup-profile');
       } else {
         await repo.signInWithEmail(email, password);
+        if (mounted) context.go('/');
       }
-      if (mounted) context.go('/');
     } on FirebaseAuthException catch (e) {
       setState(() => _errorMessage = _friendlyError(e.code));
     } catch (e) {

@@ -22,6 +22,9 @@ class AuthRepository {
     return cred.user!.uid;
   }
 
+  Future<void> updateDisplayName(String name) =>
+      _auth.currentUser!.updateDisplayName(name);
+
   Future<void> signOut() => _auth.signOut();
 
   /// Legacy: ensures any signed-in session (used by game flow for uid reads).
