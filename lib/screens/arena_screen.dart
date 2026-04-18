@@ -192,7 +192,7 @@ class _CardBack extends StatelessWidget {
       child: eyeActive
           ? Center(child: Icon(Icons.visibility_outlined, color: eyeColor, size: width * .46))
           : selected
-              ? Center(child: Icon(Icons.check_circle_outline_rounded, color: AppColors.primary, size: width * .4))
+              ? Center(child: Icon(Icons.swap_horiz_rounded, color: AppColors.primary, size: width * .46))
               : null,
     );
   }
@@ -423,7 +423,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
 
   // ── power states ─────────────────────────────────────────────────────────────
   int? _swapOwnSlot;          // J/Q: selected own slot
-  List<_KingTarget> _kingTargets = [];   // K: peeked targets
+  List<_KingTarget> _kingTargets = [];   // K: peeked targets (1 own + 1 opponent)
+
+  // ── opponent turn ─────────────────────────────────────────────────────────────
+  bool _isOpponentTurn = false;
+  Timer? _opponentTimer;
 
   // ── banner ────────────────────────────────────────────────────────────────────
   bool _bannerVisible = false;
@@ -438,6 +442,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
   void dispose() {
     _peekHideTimer?.cancel();
     _revealTimer?.cancel();
+    _opponentTimer?.cancel();
     super.dispose();
   }
 
@@ -465,6 +470,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
       _kingTargets = [];
       _revealOwnSlot = null;
       _revealOpponentSlot = null;
+      _isOpponentTurn = false;
     });
   }
 
@@ -497,12 +503,22 @@ class _ArenaScreenState extends State<ArenaScreen> {
       _kingTargets = [];
       _revealOwnSlot = null;
       _revealOpponentSlot = null;
+      _isOpponentTurn = false;
     });
   }
 
   // ── Random helpers ────────────────────────────────────────────────────────────
   double _rAngle() => (_random.nextDouble() - 0.5) * 0.52;
   Offset _rOffset() => Offset((_random.nextDouble() - 0.5) * 14, (_random.nextDouble() - 0.5) * 10);
+
+  // ── End player turn (triggers opponent "thinking") ────────────────────────────
+  void _endPlayerTurn() {
+    _opponentTimer?.cancel();
+    setState(() { _phase = _Phase.turn; _isOpponentTurn = true; });
+    _opponentTimer = Timer(const Duration(milliseconds: 1800), () {
+      if (mounted) setState(() => _isOpponentTurn = false);
+    });
+  }
 
   // ── Banner ───────────────────────────────────────────────────────────────────
   void _showBanner(String text, String sub, Color color, {Duration dur = const Duration(milliseconds: 1600)}) {
@@ -538,7 +554,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
 
   // ── Draw ─────────────────────────────────────────────────────────────────────
   void _drawCard() {
-    if (_drawnCard != null || _deck.isEmpty || _phase != _Phase.turn) return;
+    if (_drawnCard != null || _deck.isEmpty || _phase != _Phase.turn || _isOpponentTurn) return;
     setState(() {
       _drawnCard = _deck.removeLast();
       _phase = _Phase.cardDrawn;
@@ -564,9 +580,9 @@ class _ArenaScreenState extends State<ArenaScreen> {
       _playerCards = newCards;
       _discardStack = [..._discardStack, _DiscardEntry(outCard, _rAngle(), _rOffset())];
       _drawnCard = null;
-      _phase = _Phase.turn;
       _justSwappedSlots = {..._justSwappedSlots, i};
     });
+    _endPlayerTurn();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _justSwappedSlots = _justSwappedSlots.difference({i}));
     });
@@ -575,14 +591,16 @@ class _ArenaScreenState extends State<ArenaScreen> {
   // ── Cut ──────────────────────────────────────────────────────────────────────
   void _handleCut() {
     _showBanner('¡CORTE!', 'Última vuelta del rival', AppColors.danger, dur: const Duration(seconds: 2));
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) _startNextRound();
+    _opponentTimer?.cancel();
+    setState(() => _isOpponentTurn = true);
+    _opponentTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) { setState(() => _isOpponentTurn = false); _startNextRound(); }
     });
   }
 
   // ── Powers ───────────────────────────────────────────────────────────────────
   void _activatePower(GameCard card) {
-    if (card.isJoker) { setState(() => _phase = _Phase.turn); return; }
+    if (card.isJoker) { _endPlayerTurn(); return; }
     switch (card.rank) {
       case 7:
       case 8:
@@ -603,12 +621,12 @@ class _ArenaScreenState extends State<ArenaScreen> {
           if (mounted) setState(() { _phase = _Phase.powerSwapSelectOwn; _swapOwnSlot = null; });
         });
       case 13:
-        _showBanner('PODER REY', 'Mirá 2 cartas y decidí si intercambiar', AppColors.primary);
+        _showBanner('PODER REY', 'Mirá 1 tuya y 1 del rival, decidí si intercambiar', AppColors.primary);
         Future.delayed(const Duration(milliseconds: 1700), () {
           if (mounted) setState(() { _phase = _Phase.powerKingPeek; _kingTargets = []; });
         });
       default:
-        setState(() => _phase = _Phase.turn);
+        _endPlayerTurn();
     }
   }
 
@@ -616,7 +634,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
   void _onPeekOwn(int i) {
     if (_phase != _Phase.powerPeekOwn) return;
     _revealTimer?.cancel();
-    setState(() { _revealOwnSlot = i; _phase = _Phase.turn; });
+    setState(() => _revealOwnSlot = i);
+    _endPlayerTurn();
     _revealTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _revealOwnSlot = null);
     });
@@ -626,7 +645,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
   void _onPeekOpponent(int i) {
     if (_phase != _Phase.powerPeekOpponent) return;
     _revealTimer?.cancel();
-    setState(() { _revealOpponentSlot = i; _phase = _Phase.turn; });
+    setState(() => _revealOpponentSlot = i);
+    _endPlayerTurn();
     _revealTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _revealOpponentSlot = null);
     });
@@ -650,9 +670,9 @@ class _ArenaScreenState extends State<ArenaScreen> {
       _playerCards = newPlayer;
       _opponentCards = newOpponent;
       _swapOwnSlot = null;
-      _phase = _Phase.turn;
       _justSwappedSlots = {..._justSwappedSlots, own};
     });
+    _endPlayerTurn();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _justSwappedSlots = _justSwappedSlots.difference({own}));
     });
@@ -664,6 +684,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
     if (_phase != _Phase.powerKingPeek) return;
     final target = _KingTarget(isOwn, i);
     if (_kingTargets.contains(target)) return;
+    // Enforce 1 from own side + 1 from opponent side
+    if (_kingTargets.isNotEmpty && _kingTargets[0].isOwn == isOwn) return;
     final newTargets = [..._kingTargets, target];
     setState(() => _kingTargets = newTargets);
     if (newTargets.length == 2) {
@@ -684,7 +706,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
       setState(() { _playerCards = newPlayer; _opponentCards = newOpponent; });
       _showBanner('¡INTERCAMBIO REY!', '', AppColors.primary);
     }
-    setState(() { _kingTargets = []; _phase = _Phase.turn; });
+    setState(() => _kingTargets = []);
+    _endPlayerTurn();
   }
 
   // ── Demo shortcuts ────────────────────────────────────────────────────────────
@@ -696,8 +719,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
   // ── Build ─────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final isKingPeekOwn = _phase == _Phase.powerKingPeek;
+    final hasOwnKingTarget = _kingTargets.any((t) => t.isOwn);
+    final hasOppKingTarget = _kingTargets.any((t) => !t.isOwn);
     final opponentEye = _phase == _Phase.powerPeekOpponent;
+    final opponentKingEye = _phase == _Phase.powerKingPeek && !hasOppKingTarget;
+    final ownKingEyeEnabled = _phase == _Phase.powerKingPeek && !hasOwnKingTarget;
     final opponentKingPeeked = _kingTargets.where((t) => !t.isOwn).map((t) => t.slot).toSet();
     final playerKingPeeked = _kingTargets.where((t) => t.isOwn).map((t) => t.slot).toSet();
     final swapOpponent = _phase == _Phase.powerSwapSelectOpponent;
@@ -733,39 +759,47 @@ class _ArenaScreenState extends State<ArenaScreen> {
               _OpponentSection(
                 opponentCards: _opponentCards,
                 revealingSlot: _revealOpponentSlot,
-                peekEye: opponentEye || isKingPeekOwn,
+                peekEye: opponentEye || opponentKingEye,
                 kingPeekedSlots: opponentKingPeeked,
                 swapSelectable: swapOpponent,
+                isThinking: _isOpponentTurn,
                 onTapCard: (i) {
                   if (_phase == _Phase.powerPeekOpponent) _onPeekOpponent(i);
-                  else if (_phase == _Phase.powerKingPeek) _onKingPeek(false, i);
+                  else if (opponentKingEye) _onKingPeek(false, i);
                   else if (_phase == _Phase.powerSwapSelectOpponent) _onSwapSelectOpponent(i);
                 },
               ),
               const SizedBox(height: AppSpacing.sm),
               _RoundsBadge(remaining: _roundsRemaining),
               const SizedBox(height: AppSpacing.xs),
-              _PhaseHint(phase: _phase, peeksUsed: _peeksUsed, kingCount: _kingTargets.length, swapOwnSelected: _swapOwnSlot != null),
+              _PhaseHint(
+                phase: _phase, peeksUsed: _peeksUsed,
+                kingCount: _kingTargets.length, swapOwnSelected: _swapOwnSlot != null,
+                kingPickedOwn: hasOwnKingTarget, kingPickedOpp: hasOppKingTarget,
+              ),
               const SizedBox(height: AppSpacing.xs),
-              _PowerDemoBar(onDemo: _demoPower, enabled: _phase == _Phase.turn),
+              _PowerDemoBar(onDemo: _demoPower, enabled: _phase == _Phase.turn && !_isOpponentTurn),
               const Spacer(),
               _TableCenter(
                 deckCount: _deck.length,
                 discardStack: _discardStack,
                 drawnCard: _drawnCard,
-                canDraw: _phase == _Phase.turn && _drawnCard == null,
+                canDraw: _phase == _Phase.turn && _drawnCard == null && !_isOpponentTurn,
                 onDrawCard: _drawCard,
                 onDiscardDrawn: _discardDrawn,
               ),
               const SizedBox(height: AppSpacing.sm),
               _ActionBar(
                 phase: _phase,
+                isOpponentTurn: _isOpponentTurn,
                 onCut: _handleCut,
                 onMirror: () {},
                 onKingSwap: () => _kingDecide(true),
                 onKingKeep: () => _kingDecide(false),
               ),
-              const SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.xs),
+              _TurnIndicator(isPlayerTurn: _phase == _Phase.turn && !_isOpponentTurn),
+              const SizedBox(height: AppSpacing.xs),
               _PlayerHand(
                 playerCards: _playerCards,
                 phase: _phase,
@@ -774,11 +808,12 @@ class _ArenaScreenState extends State<ArenaScreen> {
                 justSwappedSlots: _justSwappedSlots,
                 initialPeekShowing: _initialPeekShowing,
                 swapOwnSlot: _swapOwnSlot,
+                ownKingEyeEnabled: ownKingEyeEnabled,
                 onTapCard: (i) {
                   if (_phase == _Phase.peekInitial) _onTapInitialPeek(i);
                   else if (_phase == _Phase.cardDrawn) _swapWithSlot(i);
                   else if (_phase == _Phase.powerPeekOwn) _onPeekOwn(i);
-                  else if (_phase == _Phase.powerKingPeek) _onKingPeek(true, i);
+                  else if (ownKingEyeEnabled) _onKingPeek(true, i);
                   else if (_phase == _Phase.powerSwapSelectOwn) _onSwapSelectOwn(i);
                 },
               ),
@@ -808,12 +843,13 @@ class _OpponentSection extends StatelessWidget {
   final bool peekEye;
   final Set<int> kingPeekedSlots;
   final bool swapSelectable;
+  final bool isThinking;
   final void Function(int) onTapCard;
 
   const _OpponentSection({
     required this.opponentCards, required this.revealingSlot,
     required this.peekEye, required this.kingPeekedSlots,
-    required this.swapSelectable, required this.onTapCard,
+    required this.swapSelectable, required this.isThinking, required this.onTapCard,
   });
 
   @override
@@ -839,13 +875,24 @@ class _OpponentSection extends StatelessWidget {
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('NEON_DRIFTER', style: AppText.titleSmall),
               const SizedBox(height: 3),
-              Row(children: [
-                Container(width: 7, height: 7,
-                    decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
-                const SizedBox(width: 5),
-                Text('Pensando...', style: AppText.caption.copyWith(
-                    color: AppColors.success, fontWeight: FontWeight.w500)),
-              ]),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: isThinking
+                  ? Row(key: const ValueKey('thinking'), children: [
+                      Container(width: 7, height: 7,
+                          decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
+                      const SizedBox(width: 5),
+                      Text('Pensando...', style: AppText.caption.copyWith(
+                          color: AppColors.success, fontWeight: FontWeight.w500)),
+                    ])
+                  : Row(key: const ValueKey('waiting'), children: [
+                      Container(width: 7, height: 7,
+                          decoration: const BoxDecoration(color: AppColors.textMuted, shape: BoxShape.circle)),
+                      const SizedBox(width: 5),
+                      Text('Esperando', style: AppText.caption.copyWith(
+                          color: AppColors.textMuted, fontWeight: FontWeight.w500)),
+                    ]),
+              ),
             ]),
           ]),
         ),
@@ -914,7 +961,10 @@ class _PhaseHint extends StatelessWidget {
   final int peeksUsed;
   final int kingCount;
   final bool swapOwnSelected;
-  const _PhaseHint({required this.phase, required this.peeksUsed, required this.kingCount, required this.swapOwnSelected});
+  final bool kingPickedOwn;
+  final bool kingPickedOpp;
+  const _PhaseHint({required this.phase, required this.peeksUsed, required this.kingCount,
+    required this.swapOwnSelected, required this.kingPickedOwn, required this.kingPickedOpp});
 
   @override
   Widget build(BuildContext context) {
@@ -937,7 +987,9 @@ class _PhaseHint extends StatelessWidget {
         text = 'PODER: Ahora tocá una carta del RIVAL';
         color = AppColors.success;
       case _Phase.powerKingPeek:
-        text = 'REY: Tocá 2 cartas para ver ($kingCount/2)';
+        if (!kingPickedOwn && !kingPickedOpp) text = 'REY: Tocá 1 tuya y 1 del rival';
+        else if (kingPickedOwn) text = 'REY: Ahora tocá 1 carta del RIVAL';
+        else text = 'REY: Ahora tocá 1 carta TUYA';
         color = AppColors.primary;
       case _Phase.powerKingDecide:
         text = '¿Intercambiás estas 2 cartas?';
@@ -1063,13 +1115,14 @@ class _TableCenter extends StatelessWidget {
 
 class _ActionBar extends StatelessWidget {
   final _Phase phase;
+  final bool isOpponentTurn;
   final VoidCallback onCut;
   final VoidCallback onMirror;
   final VoidCallback onKingSwap;
   final VoidCallback onKingKeep;
 
   const _ActionBar({
-    required this.phase, required this.onCut,
+    required this.phase, required this.isOpponentTurn, required this.onCut,
     required this.onMirror, required this.onKingSwap, required this.onKingKeep,
   });
 
@@ -1094,9 +1147,9 @@ class _ActionBar extends StatelessWidget {
         _Phase.powerSwapSelectOpponent ||
         _Phase.powerKingPeek => const SizedBox(height: 52),
         _ => Row(children: [
-          Expanded(child: _Btn(label: 'CORTAR', icon: Icons.content_cut_rounded, color: AppColors.danger, solid: false, onTap: onCut)),
+          Expanded(child: _Btn(label: 'CORTAR', icon: Icons.content_cut_rounded, color: AppColors.danger, solid: false, onTap: isOpponentTurn ? () {} : onCut, disabled: isOpponentTurn)),
           const SizedBox(width: AppSpacing.md),
-          Expanded(child: _Btn(label: '¡ESPEJO!', icon: Icons.copy_all_rounded, color: AppColors.success, solid: true, onTap: onMirror)),
+          Expanded(child: _Btn(label: '¡ESPEJO!', icon: Icons.copy_all_rounded, color: AppColors.success, solid: true, onTap: isOpponentTurn ? () {} : onMirror, disabled: isOpponentTurn)),
         ]),
       },
     );
@@ -1108,26 +1161,60 @@ class _Btn extends StatelessWidget {
   final IconData icon;
   final Color color;
   final bool solid;
+  final bool disabled;
   final VoidCallback onTap;
-  const _Btn({required this.label, required this.icon, required this.color, required this.solid, required this.onTap});
+  const _Btn({required this.label, required this.icon, required this.color, required this.solid, required this.onTap, this.disabled = false});
 
   @override
   Widget build(BuildContext context) {
-    final bg = solid ? color : color.withValues(alpha: .15);
-    final fg = solid ? AppColors.bgDeepest : color;
+    final effectiveColor = disabled ? AppColors.textMuted : color;
+    final bg = solid ? effectiveColor : effectiveColor.withValues(alpha: .15);
+    final fg = solid ? AppColors.bgDeepest : effectiveColor;
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 52,
-        decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(color: color, width: 1.5),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: .30), blurRadius: 12)],
+      onTap: disabled ? null : onTap,
+      child: Opacity(
+        opacity: disabled ? 0.45 : 1.0,
+        child: Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: bg, borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: effectiveColor, width: 1.5),
+            boxShadow: disabled ? [] : [BoxShadow(color: effectiveColor.withValues(alpha: .30), blurRadius: 12)],
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(icon, color: fg, size: 18),
+            const SizedBox(width: 8),
+            Text(label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1.1)),
+          ]),
         ),
-        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, color: fg, size: 18),
-          const SizedBox(width: 8),
-          Text(label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1.1)),
+      ),
+    );
+  }
+}
+
+// ─── Turn Indicator ──────────────────────────────────────────────────────────
+
+class _TurnIndicator extends StatelessWidget {
+  final bool isPlayerTurn;
+  const _TurnIndicator({required this.isPlayerTurn});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      opacity: isPlayerTurn ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 400),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base, vertical: AppSpacing.xs),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          color: AppColors.accent.withValues(alpha: .12),
+          border: Border.all(color: AppColors.accent.withValues(alpha: .5), width: 1),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.flash_on_rounded, color: AppColors.accent, size: 11),
+          const SizedBox(width: 4),
+          Text('TU TURNO', style: AppText.caption.copyWith(
+              color: AppColors.accent, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1.5)),
         ]),
       ),
     );
@@ -1144,12 +1231,14 @@ class _PlayerHand extends StatelessWidget {
   final Set<int> justSwappedSlots;
   final Set<int> initialPeekShowing;
   final int? swapOwnSlot;
+  final bool ownKingEyeEnabled;
   final void Function(int) onTapCard;
 
   const _PlayerHand({
     required this.playerCards, required this.phase, required this.revealingSlot,
     required this.kingPeekedSlots, required this.justSwappedSlots,
-    required this.initialPeekShowing, required this.swapOwnSlot, required this.onTapCard,
+    required this.initialPeekShowing, required this.swapOwnSlot,
+    required this.ownKingEyeEnabled, required this.onTapCard,
   });
 
   @override
@@ -1166,12 +1255,12 @@ class _PlayerHand extends StatelessWidget {
         final showFace = isRevealing || isKingPeeked || (isInitialPeek && !justSwapped);
 
         final isSwapOwn = swapOwnSlot == i;
-        final eyeActive = (phase == _Phase.powerPeekOwn || (phase == _Phase.powerKingPeek && !isKingPeeked));
+        final eyeActive = phase == _Phase.powerPeekOwn || (ownKingEyeEnabled && !isKingPeeked);
         final tappable = switch (phase) {
           _Phase.peekInitial => !isInitialPeek,
           _Phase.cardDrawn => true,
           _Phase.powerPeekOwn => !isRevealing,
-          _Phase.powerKingPeek => !isKingPeeked,
+          _Phase.powerKingPeek => ownKingEyeEnabled && !isKingPeeked,
           _Phase.powerSwapSelectOwn => true,
           _ => false,
         };
