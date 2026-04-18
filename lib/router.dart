@@ -2,17 +2,16 @@ import 'package:go_router/go_router.dart';
 
 import 'screens/arena_screen.dart';
 import 'screens/game_screen.dart';
-import 'screens/home_screen.dart';
 import 'screens/lobby_screen.dart';
+import 'screens/main_screen.dart';
 import 'screens/match_result_screen.dart';
-import 'screens/tienda_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/',
   routes: [
     GoRoute(
       path: '/',
-      builder: (_, _) => const HomeScreen(),
+      builder: (_, _) => const MainScreen(),
     ),
     GoRoute(
       path: '/lobby/:code',
@@ -33,10 +32,6 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/arena',
       builder: (_, _) => const ArenaScreen(),
-    ),
-    GoRoute(
-      path: '/tienda',
-      builder: (_, _) => const TiendaScreen(),
     ),
   ],
 );
