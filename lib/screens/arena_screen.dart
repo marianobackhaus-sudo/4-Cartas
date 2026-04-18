@@ -425,6 +425,9 @@ class _ArenaScreenState extends State<ArenaScreen> {
   int? _swapOwnSlot;          // J/Q: selected own slot
   List<_KingTarget> _kingTargets = [];   // K: peeked targets (1 own + 1 opponent)
 
+  // ── game over ─────────────────────────────────────────────────────────────────
+  bool _gameOver = false;
+
   // ── opponent turn ─────────────────────────────────────────────────────────────
   bool _isOpponentTurn = false;
   Timer? _opponentTimer;
@@ -471,16 +474,14 @@ class _ArenaScreenState extends State<ArenaScreen> {
       _revealOwnSlot = null;
       _revealOpponentSlot = null;
       _isOpponentTurn = false;
+      _gameOver = false;
     });
   }
 
   void _startNextRound() {
     final rem = _roundsRemaining - 1;
     if (rem <= 0) {
-      _showBanner('¡PARTIDA TERMINADA!', '', AppColors.primary);
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) _initRound();
-      });
+      setState(() => _gameOver = true);
       return;
     }
     final cards = _buildFullDeck()..shuffle(_random);
@@ -830,7 +831,163 @@ class _ArenaScreenState extends State<ArenaScreen> {
             color: _bannerColor,
           ),
         ),
+        // Game over overlay
+        if (_gameOver)
+          Positioned.fill(
+            child: _GameOverOverlay(
+              playerCards: _playerCards,
+              opponentCards: _opponentCards,
+              onPlayAgain: _initRound,
+              onExit: () => Navigator.of(context).pop(),
+            ),
+          ),
       ]),
+    );
+  }
+}
+
+// ─── Game Over Overlay ────────────────────────────────────────────────────────
+
+class _GameOverOverlay extends StatelessWidget {
+  final List<GameCard> playerCards;
+  final List<GameCard> opponentCards;
+  final VoidCallback onPlayAgain;
+  final VoidCallback onExit;
+
+  const _GameOverOverlay({
+    required this.playerCards, required this.opponentCards,
+    required this.onPlayAgain, required this.onExit,
+  });
+
+  int _score(List<GameCard> cards) => cards.fold(0, (sum, c) => sum + c.value);
+
+  Widget _cardCol(GameCard card) {
+    final isJoker = card.isJoker;
+    final valLabel = isJoker ? '−2' : '${card.value}';
+    final valColor = isJoker ? AppColors.cardInkJoker : AppColors.textPrimary;
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      _CardFace(card: card, width: 58),
+      const SizedBox(height: 5),
+      Text(valLabel, style: TextStyle(color: valColor, fontSize: 13, fontWeight: FontWeight.w700)),
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final playerScore = _score(playerCards);
+    final opponentScore = _score(opponentCards);
+    final playerWins = playerScore <= opponentScore;
+
+    return Container(
+      color: Colors.black.withValues(alpha: .88),
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.xl, AppSpacing.xl2, AppSpacing.xl, AppSpacing.xl),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.xl),
+              border: Border.all(color: AppColors.primary, width: 2),
+              boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .35), blurRadius: 48, spreadRadius: 4)],
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('¡FIN DE LA PARTIDA!', style: TextStyle(
+                  color: AppColors.primary, fontSize: 20,
+                  fontWeight: FontWeight.w800, letterSpacing: 2.5)),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                playerWins ? '¡GANASTE! 🏆' : 'El rival ganó esta vez',
+                style: TextStyle(
+                  color: playerWins ? AppColors.success : AppColors.danger,
+                  fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: AppSpacing.xl2),
+
+              // Player cards
+              Text('TUS CARTAS', style: AppText.label),
+              const SizedBox(height: AppSpacing.sm),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: playerCards
+                    .map((c) => Padding(padding: const EdgeInsets.symmetric(horizontal: 5), child: _cardCol(c)))
+                    .toList(),
+              ),
+              const SizedBox(height: AppSpacing.base),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl2, vertical: AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: .1),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  border: Border.all(color: AppColors.primary),
+                ),
+                child: Column(children: [
+                  Text('PUNTAJE', style: AppText.label),
+                  Text('$playerScore', style: TextStyle(
+                      color: AppColors.primary, fontSize: 44,
+                      fontWeight: FontWeight.w800, fontFeatures: const [FontFeature.tabularFigures()])),
+                  Text('(cuanto más bajo, mejor)', style: AppText.caption),
+                ]),
+              ),
+              const SizedBox(height: AppSpacing.xl),
+
+              // Opponent cards (collapsed, smaller)
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.base),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(children: [
+                  Text('RIVAL  •  PUNTAJE: $opponentScore', style: AppText.label),
+                  const SizedBox(height: AppSpacing.sm),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: opponentCards
+                        .map((c) => Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              child: _CardFace(card: c, width: 48)))
+                        .toList(),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: AppSpacing.xl2),
+
+              // Buttons
+              Row(children: [
+                Expanded(child: GestureDetector(
+                  onTap: onExit,
+                  child: Container(
+                    height: 52,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      border: Border.all(color: AppColors.border, width: 1.5),
+                    ),
+                    child: const Center(child: Text('SALIR', style: TextStyle(
+                        color: AppColors.textSecondary, fontWeight: FontWeight.w800, letterSpacing: 1.2))),
+                  ),
+                )),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(child: GestureDetector(
+                  onTap: onPlayAgain,
+                  child: Container(
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .4), blurRadius: 14)],
+                    ),
+                    child: const Center(child: Text('JUGAR DE NUEVO', style: TextStyle(
+                        color: AppColors.bgDeepest, fontWeight: FontWeight.w800,
+                        fontSize: 12, letterSpacing: 0.8))),
+                  ),
+                )),
+              ]),
+            ]),
+          ),
+        ),
+      ),
     );
   }
 }
