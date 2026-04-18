@@ -7,7 +7,34 @@ import '../core/design_tokens.dart';
 import '../core/typography.dart';
 import '../engine/models/card.dart';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Phase ────────────────────────────────────────────────────────────────────
+
+enum _Phase {
+  peekInitial,             // Start: choose 2 cards to memorize
+  turn,                    // Normal turn: tap mazo or cut
+  cardDrawn,               // Card drawn, waiting for action
+  powerPeekOwn,            // 7/8: peek one own card
+  powerPeekOpponent,       // 9/10: peek one opponent card
+  powerSwapSelectOwn,      // J/Q step 1: select own card
+  powerSwapSelectOpponent, // J/Q step 2: select opponent card
+  powerKingPeek,           // K step 1: peek any 2 cards
+  powerKingDecide,         // K step 2: swap or leave
+}
+
+// ─── King Target ──────────────────────────────────────────────────────────────
+
+class _KingTarget {
+  final bool isOwn;
+  final int slot;
+  const _KingTarget(this.isOwn, this.slot);
+
+  @override
+  bool operator ==(Object o) => o is _KingTarget && o.isOwn == isOwn && o.slot == slot;
+  @override
+  int get hashCode => Object.hash(isOwn, slot);
+}
+
+// ─── Discard Entry ────────────────────────────────────────────────────────────
 
 class _DiscardEntry {
   final GameCard card;
@@ -30,33 +57,22 @@ List<GameCard> _buildFullDeck() {
   return cards;
 }
 
-// ─── String / Color Helpers ───────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 String _suitSymbol(Suit s) {
   switch (s) {
-    case Suit.hearts:
-      return '♥';
-    case Suit.diamonds:
-      return '♦';
-    case Suit.clubs:
-      return '♣';
-    case Suit.spades:
-      return '♠';
+    case Suit.hearts:   return '♥';
+    case Suit.diamonds: return '♦';
+    case Suit.clubs:    return '♣';
+    case Suit.spades:   return '♠';
   }
 }
 
 String _rankLabel(int r) {
   switch (r) {
-    case 1:
-      return 'A';
-    case 11:
-      return 'J';
-    case 12:
-      return 'Q';
-    case 13:
-      return 'K';
-    default:
-      return '$r';
+    case 1: return 'A';  case 11: return 'J';
+    case 12: return 'Q'; case 13: return 'K';
+    default: return '$r';
   }
 }
 
@@ -65,12 +81,16 @@ Color _suitColor(Suit s) =>
         ? AppColors.cardInkRed
         : AppColors.cardInkBlack;
 
+int _totalRoundsFor(GameCard firstDiscard) {
+  if (firstDiscard.isJoker) return 1;
+  return firstDiscard.rank.clamp(1, 5);
+}
+
 // ─── Card Face ────────────────────────────────────────────────────────────────
 
 class _CardFace extends StatelessWidget {
   final GameCard card;
   final double width;
-
   const _CardFace({required this.card, this.width = 72});
 
   @override
@@ -82,39 +102,17 @@ class _CardFace extends StatelessWidget {
     final h = width / AppCardDims.aspectRatio;
 
     return Container(
-      width: width,
-      height: h,
+      width: width, height: h,
       decoration: BoxDecoration(
         color: AppColors.cardFace,
         borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(color: AppColors.cardFaceEdge),
-        boxShadow: const [
-          BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
-        ],
+        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4))],
       ),
       child: Stack(children: [
-        Positioned(
-          top: 5, left: 7,
-          child: _CornerLabel(rnk: rnk, sym: sym, color: color),
-        ),
-        Center(
-          child: Text(
-            sym,
-            style: TextStyle(
-              color: color,
-              fontSize: width * 0.30,
-              height: 1,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: 5, right: 7,
-          child: Transform.rotate(
-            angle: math.pi,
-            child: _CornerLabel(rnk: rnk, sym: sym, color: color),
-          ),
-        ),
+        Positioned(top: 5, left: 7, child: _CornerLabel(rnk: rnk, sym: sym, color: color)),
+        Center(child: Text(sym, style: TextStyle(color: color, fontSize: width * .30, height: 1, fontWeight: FontWeight.w700))),
+        Positioned(bottom: 5, right: 7, child: Transform.rotate(angle: math.pi, child: _CornerLabel(rnk: rnk, sym: sym, color: color))),
       ]),
     );
   }
@@ -123,28 +121,22 @@ class _CardFace extends StatelessWidget {
 class _JokerFace extends StatelessWidget {
   final double width;
   const _JokerFace({this.width = 72});
-
   @override
   Widget build(BuildContext context) {
     final h = width / AppCardDims.aspectRatio;
     return Container(
-      width: width,
-      height: h,
+      width: width, height: h,
       decoration: BoxDecoration(
         color: AppColors.cardFace,
         borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: AppColors.cardInkJoker.withValues(alpha: 0.6)),
-        boxShadow: [
-          const BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
-          BoxShadow(color: AppColors.cardInkJoker.withValues(alpha: 0.3), blurRadius: 12),
-        ],
+        border: Border.all(color: AppColors.cardInkJoker.withValues(alpha: .6)),
+        boxShadow: [const BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
+          BoxShadow(color: AppColors.cardInkJoker.withValues(alpha: .3), blurRadius: 12)],
       ),
-      child: Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('★', style: TextStyle(color: AppColors.cardInkJoker, fontSize: width * 0.28, height: 1)),
-          Text('JKR', style: TextStyle(color: AppColors.cardInkJoker, fontSize: width * 0.14, fontWeight: FontWeight.w800, letterSpacing: 1)),
-        ]),
-      ),
+      child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('★', style: TextStyle(color: AppColors.cardInkJoker, fontSize: width * .28, height: 1)),
+        Text('JKR', style: TextStyle(color: AppColors.cardInkJoker, fontSize: width * .14, fontWeight: FontWeight.w800, letterSpacing: 1)),
+      ])),
     );
   }
 }
@@ -152,16 +144,12 @@ class _JokerFace extends StatelessWidget {
 class _CornerLabel extends StatelessWidget {
   final String rnk, sym;
   final Color color;
-
   const _CornerLabel({required this.rnk, required this.sym, required this.color});
-
   @override
   Widget build(BuildContext context) {
     final s = TextStyle(color: color, fontWeight: FontWeight.w800, height: 1.1, fontSize: 13);
     return Column(mainAxisSize: MainAxisSize.min, children: [
-      Text(rnk, style: s),
-      Text(sym, style: s.copyWith(fontSize: 11)),
-    ]);
+      Text(rnk, style: s), Text(sym, style: s.copyWith(fontSize: 11))]);
   }
 }
 
@@ -172,61 +160,57 @@ class _CardBack extends StatelessWidget {
   final Color? borderColor;
   final bool eyeActive;
   final Color eyeColor;
+  final bool selected; // J/Q swap selected
 
   const _CardBack({
-    this.width = 72,
-    this.borderColor,
-    this.eyeActive = false,
-    this.eyeColor = AppColors.accent,
+    this.width = 72, this.borderColor, this.eyeActive = false,
+    this.eyeColor = AppColors.accent, this.selected = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final h = width / AppCardDims.aspectRatio;
-    final bc = borderColor ?? (eyeActive ? eyeColor : AppColors.border);
+    final bc = selected
+        ? AppColors.primary
+        : borderColor ?? (eyeActive ? eyeColor : AppColors.border);
+    final bw = (eyeActive || selected) ? 1.5 : 1.0;
 
     return Container(
-      width: width,
-      height: h,
+      width: width, height: h,
       decoration: BoxDecoration(
-        color: AppColors.cardBack,
+        color: selected
+            ? AppColors.primary.withValues(alpha: .12)
+            : AppColors.cardBack,
         borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: bc, width: eyeActive ? 1.5 : 1.0),
+        border: Border.all(color: bc, width: bw),
         boxShadow: [
           const BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
-          if (eyeActive)
-            BoxShadow(color: eyeColor.withValues(alpha: 0.40), blurRadius: 18, spreadRadius: 2),
+          if (eyeActive || selected)
+            BoxShadow(color: bc.withValues(alpha: .40), blurRadius: 16, spreadRadius: 2),
         ],
       ),
       child: eyeActive
-          ? Center(
-              child: Icon(Icons.visibility_outlined, color: eyeColor, size: width * 0.46),
-            )
-          : null,
+          ? Center(child: Icon(Icons.visibility_outlined, color: eyeColor, size: width * .46))
+          : selected
+              ? Center(child: Icon(Icons.check_circle_outline_rounded, color: AppColors.primary, size: width * .4))
+              : null,
     );
   }
 }
 
-// ─── Flip Card (3D Y-axis) ────────────────────────────────────────────────────
+// ─── Flip Card ────────────────────────────────────────────────────────────────
 
 class _FlippableCard extends StatefulWidget {
   final bool showFace;
   final Widget front;
   final Widget back;
-
-  const _FlippableCard({
-    super.key,
-    required this.showFace,
-    required this.front,
-    required this.back,
-  });
+  const _FlippableCard({super.key, required this.showFace, required this.front, required this.back});
 
   @override
   State<_FlippableCard> createState() => _FlippableCardState();
 }
 
-class _FlippableCardState extends State<_FlippableCard>
-    with SingleTickerProviderStateMixin {
+class _FlippableCardState extends State<_FlippableCard> with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _anim;
 
@@ -234,36 +218,28 @@ class _FlippableCardState extends State<_FlippableCard>
   void initState() {
     super.initState();
     _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 380));
-    _anim = Tween<double>(begin: 0.0, end: math.pi)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+    _anim = Tween<double>(begin: 0.0, end: math.pi).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
     if (widget.showFace) _ctrl.value = 1.0;
   }
 
   @override
   void didUpdateWidget(_FlippableCard old) {
     super.didUpdateWidget(old);
-    if (widget.showFace != old.showFace) {
-      widget.showFace ? _ctrl.forward() : _ctrl.reverse();
-    }
+    if (widget.showFace != old.showFace) widget.showFace ? _ctrl.forward() : _ctrl.reverse();
   }
 
   @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+  void dispose() { _ctrl.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _anim,
-      builder: (context2, child2) {
+      builder: (ctx, ch) {
         final angle = _anim.value;
         final showFront = angle > math.pi / 2;
         return Transform(
-          transform: Matrix4.identity()
-            ..setEntry(3, 2, 0.001)
-            ..rotateY(showFront ? angle - math.pi : angle),
+          transform: Matrix4.identity()..setEntry(3, 2, 0.001)..rotateY(showFront ? angle - math.pi : angle),
           alignment: Alignment.center,
           child: showFront ? widget.front : widget.back,
         );
@@ -272,20 +248,14 @@ class _FlippableCardState extends State<_FlippableCard>
   }
 }
 
-// ─── Deck Card (draw pile with stacked icon) ──────────────────────────────────
+// ─── Deck Card ────────────────────────────────────────────────────────────────
 
 class _DeckCard extends StatelessWidget {
   final double width;
   final int count;
   final VoidCallback? onTap;
   final bool canDraw;
-
-  const _DeckCard({
-    this.width = 100,
-    required this.count,
-    this.onTap,
-    this.canDraw = true,
-  });
+  const _DeckCard({this.width = 100, required this.count, this.onTap, this.canDraw = true});
 
   @override
   Widget build(BuildContext context) {
@@ -294,24 +264,19 @@ class _DeckCard extends StatelessWidget {
       onTap: canDraw ? onTap : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        width: width,
-        height: h,
+        width: width, height: h,
         decoration: BoxDecoration(
           color: AppColors.cardBack,
           borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(
-            color: canDraw ? AppColors.primary.withValues(alpha: 0.7) : AppColors.border,
-            width: canDraw ? 1.5 : 1.0,
-          ),
+            color: canDraw ? AppColors.primary.withValues(alpha: .7) : AppColors.border,
+            width: canDraw ? 1.5 : 1.0),
           boxShadow: [
             const BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
-            if (canDraw)
-              BoxShadow(color: AppColors.primary.withValues(alpha: 0.25), blurRadius: 14),
+            if (canDraw) BoxShadow(color: AppColors.primary.withValues(alpha: .25), blurRadius: 14),
           ],
         ),
-        child: Center(
-          child: _StackedCardsIcon(size: width * 0.52),
-        ),
+        child: Center(child: _StackedCardsIcon(size: width * .52)),
       ),
     );
   }
@@ -321,89 +286,103 @@ class _StackedCardsIcon extends StatelessWidget {
   final double size;
   const _StackedCardsIcon({required this.size});
 
-  Widget _miniCard(double angle, double opacity) {
-    return Transform.rotate(
-      angle: angle,
-      child: Container(
-        width: size,
-        height: size / AppCardDims.aspectRatio,
-        decoration: BoxDecoration(
-          color: AppColors.primary.withValues(alpha: opacity * 0.18),
-          borderRadius: BorderRadius.circular(size * 0.12),
-          border: Border.all(
-            color: AppColors.primary.withValues(alpha: opacity),
-            width: 1.0,
-          ),
-        ),
+  Widget _mini(double angle, double opacity) => Transform.rotate(
+    angle: angle,
+    child: Container(
+      width: size, height: size / AppCardDims.aspectRatio,
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: opacity * .18),
+        borderRadius: BorderRadius.circular(size * .12),
+        border: Border.all(color: AppColors.primary.withValues(alpha: opacity), width: 1),
       ),
-    );
-  }
+    ),
+  );
 
   @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: size * 1.5,
-      height: (size / AppCardDims.aspectRatio) * 1.35,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          _miniCard(-0.28, 0.35),
-          _miniCard(0.18, 0.55),
-          _miniCard(0.0, 0.90),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => SizedBox(
+    width: size * 1.5, height: (size / AppCardDims.aspectRatio) * 1.35,
+    child: Stack(alignment: Alignment.center, children: [
+      _mini(-0.28, 0.35), _mini(0.18, 0.55), _mini(0.0, 0.90),
+    ]),
+  );
 }
 
-// ─── Discard Pile (stacked, rotated cards) ────────────────────────────────────
+// ─── Discard Pile ─────────────────────────────────────────────────────────────
 
 class _DiscardPile extends StatelessWidget {
   final List<_DiscardEntry> stack;
   final double width;
-
   const _DiscardPile({required this.stack, this.width = 100});
 
   @override
   Widget build(BuildContext context) {
     final h = width / AppCardDims.aspectRatio;
-
     if (stack.isEmpty) {
       return Container(
-        width: width,
-        height: h,
+        width: width, height: h,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(AppRadius.card),
-          border: Border.all(
-            color: AppColors.border,
-            style: BorderStyle.solid,
-          ),
-        ),
-        child: Center(
-          child: Text('DESCARTE', style: AppText.caption),
-        ),
+          border: Border.all(color: AppColors.border)),
+        child: Center(child: Text('DESCARTE', style: AppText.caption)),
       );
     }
-
-    // Show max last 10 cards for performance
     final visible = stack.length > 10 ? stack.sublist(stack.length - 10) : stack;
-
     return SizedBox(
-      // Extra space so rotated cards don't clip
-      width: width + 28,
-      height: h + 28,
+      width: width + 28, height: h + 28,
       child: Stack(
         alignment: Alignment.center,
         clipBehavior: Clip.none,
-        children: visible.map((e) {
-          return Transform.translate(
-            offset: e.offset,
-            child: Transform.rotate(
-              angle: e.angle,
-              child: _CardFace(card: e.card, width: width),
+        children: visible.map((e) => Transform.translate(
+          offset: e.offset,
+          child: Transform.rotate(angle: e.angle, child: _CardFace(card: e.card, width: width)),
+        )).toList(),
+      ),
+    );
+  }
+}
+
+// ─── Power Banner ─────────────────────────────────────────────────────────────
+
+class _PowerBannerOverlay extends StatelessWidget {
+  final bool visible;
+  final String text;
+  final String sub;
+  final Color color;
+  const _PowerBannerOverlay({required this.visible, required this.text, required this.sub, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: !visible,
+      child: AnimatedOpacity(
+        opacity: visible ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 350),
+        child: Container(
+          color: Colors.black.withValues(alpha: .45),
+          child: Center(
+            child: AnimatedScale(
+              scale: visible ? 1.0 : 0.7,
+              duration: const Duration(milliseconds: 350),
+              curve: Curves.elasticOut,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.bgDeepest,
+                  borderRadius: BorderRadius.circular(AppRadius.xl),
+                  border: Border.all(color: color, width: 2),
+                  boxShadow: [BoxShadow(color: color.withValues(alpha: .45), blurRadius: 30, spreadRadius: 4)],
+                ),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(text, style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: 2)),
+                  if (sub.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(sub, style: AppText.caption.copyWith(color: color.withValues(alpha: .8))),
+                  ],
+                ]),
+              ),
             ),
-          );
-        }).toList(),
+          ),
+        ),
       ),
     );
   }
@@ -413,63 +392,156 @@ class _DiscardPile extends StatelessWidget {
 
 class ArenaScreen extends StatefulWidget {
   const ArenaScreen({super.key});
-
   @override
   State<ArenaScreen> createState() => _ArenaScreenState();
 }
 
 class _ArenaScreenState extends State<ArenaScreen> {
-  // ── peek powers ──────────────────────────────────────────────────────────────
-  bool _opponentPeekActive = false;
-  int? _revealingOpponentSlot;
-  bool _playerPeekActive = false;
-  int? _revealingPlayerSlot;
-  Timer? _revealTimer;
-
-  // ── game state ───────────────────────────────────────────────────────────────
   final _random = math.Random();
+
+  // ── game ─────────────────────────────────────────────────────────────────────
+  _Phase _phase = _Phase.peekInitial;
   late List<GameCard> _deck;
   late List<_DiscardEntry> _discardStack;
   late List<GameCard> _playerCards;
   late List<GameCard> _opponentCards;
-  Set<int> _playerKnownSlots = {};
-  Set<int> _justSwappedSlots = {};
+  int _roundsRemaining = 3;
   GameCard? _drawnCard;
 
+  // ── initial peek ─────────────────────────────────────────────────────────────
+  Set<int> _initialPeekShowing = {};
+  int _peeksUsed = 0;
+  Timer? _peekHideTimer;
+
+  // ── known / flip state ───────────────────────────────────────────────────────
+  Set<int> _justSwappedSlots = {};
+
+  // ── 3-second temporary reveals ───────────────────────────────────────────────
+  int? _revealOwnSlot;
+  int? _revealOpponentSlot;
+  Timer? _revealTimer;
+
+  // ── power states ─────────────────────────────────────────────────────────────
+  int? _swapOwnSlot;          // J/Q: selected own slot
+  List<_KingTarget> _kingTargets = [];   // K: peeked targets
+
+  // ── banner ────────────────────────────────────────────────────────────────────
+  bool _bannerVisible = false;
+  String _bannerText = '';
+  String _bannerSub = '';
+  Color _bannerColor = AppColors.primary;
+
   @override
-  void initState() {
-    super.initState();
-    _initGame();
-  }
+  void initState() { super.initState(); _initRound(); }
 
   @override
   void dispose() {
+    _peekHideTimer?.cancel();
     _revealTimer?.cancel();
     super.dispose();
   }
 
-  void _initGame() {
+  // ── Init ─────────────────────────────────────────────────────────────────────
+
+  void _initRound() {
     final cards = _buildFullDeck()..shuffle(_random);
-    _playerCards = List<GameCard>.from(cards.sublist(0, 4));
-    _opponentCards = List<GameCard>.from(cards.sublist(4, 8));
+    final pCards = List<GameCard>.from(cards.sublist(0, 4));
+    final oCards = List<GameCard>.from(cards.sublist(4, 8));
     final firstDiscard = cards[8];
-    _deck = List<GameCard>.from(cards.sublist(9));
-    _discardStack = [_DiscardEntry(firstDiscard, _rAngle(), _rOffset())];
-    _playerKnownSlots = {0, 2}; // initial peek
-    _justSwappedSlots = {};
-    _drawnCard = null;
+    final deck = List<GameCard>.from(cards.sublist(9));
+    final total = _totalRoundsFor(firstDiscard);
+    setState(() {
+      _playerCards = pCards;
+      _opponentCards = oCards;
+      _deck = deck;
+      _discardStack = [_DiscardEntry(firstDiscard, _rAngle(), _rOffset())];
+      _roundsRemaining = total;
+      _phase = _Phase.peekInitial;
+      _drawnCard = null;
+      _initialPeekShowing = {};
+      _peeksUsed = 0;
+      _justSwappedSlots = {};
+      _swapOwnSlot = null;
+      _kingTargets = [];
+      _revealOwnSlot = null;
+      _revealOpponentSlot = null;
+    });
   }
 
-  double _rAngle() => (_random.nextDouble() - 0.5) * 0.52;
-  Offset _rOffset() => Offset(
-    (_random.nextDouble() - 0.5) * 14,
-    (_random.nextDouble() - 0.5) * 10,
-  );
+  void _startNextRound() {
+    final rem = _roundsRemaining - 1;
+    if (rem <= 0) {
+      _showBanner('¡PARTIDA TERMINADA!', '', AppColors.primary);
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) _initRound();
+      });
+      return;
+    }
+    final cards = _buildFullDeck()..shuffle(_random);
+    final pCards = List<GameCard>.from(cards.sublist(0, 4));
+    final oCards = List<GameCard>.from(cards.sublist(4, 8));
+    final firstDiscard = cards[8];
+    final deck = List<GameCard>.from(cards.sublist(9));
+    setState(() {
+      _playerCards = pCards;
+      _opponentCards = oCards;
+      _deck = deck;
+      _discardStack = [_DiscardEntry(firstDiscard, _rAngle(), _rOffset())];
+      _roundsRemaining = rem;
+      _phase = _Phase.peekInitial;
+      _drawnCard = null;
+      _initialPeekShowing = {};
+      _peeksUsed = 0;
+      _justSwappedSlots = {};
+      _swapOwnSlot = null;
+      _kingTargets = [];
+      _revealOwnSlot = null;
+      _revealOpponentSlot = null;
+    });
+  }
 
+  // ── Random helpers ────────────────────────────────────────────────────────────
+  double _rAngle() => (_random.nextDouble() - 0.5) * 0.52;
+  Offset _rOffset() => Offset((_random.nextDouble() - 0.5) * 14, (_random.nextDouble() - 0.5) * 10);
+
+  // ── Banner ───────────────────────────────────────────────────────────────────
+  void _showBanner(String text, String sub, Color color, {Duration dur = const Duration(milliseconds: 1600)}) {
+    setState(() { _bannerVisible = true; _bannerText = text; _bannerSub = sub; _bannerColor = color; });
+    Future.delayed(dur, () { if (mounted) setState(() => _bannerVisible = false); });
+  }
+
+  // ── Initial peek ─────────────────────────────────────────────────────────────
+  void _onTapInitialPeek(int i) {
+    if (_initialPeekShowing.contains(i)) return; // already showing
+    if (_peeksUsed >= 2) return; // already used both peeks
+
+    _peekHideTimer?.cancel();
+    final newShowing = {..._initialPeekShowing, i};
+    final newPeeks = _peeksUsed + 1;
+
+    setState(() {
+      _initialPeekShowing = newShowing;
+      _peeksUsed = newPeeks;
+    });
+
+    if (newPeeks == 2) {
+      // Both selected: hide after 3s and start game
+      _peekHideTimer = Timer(const Duration(seconds: 3), () {
+        if (!mounted) return;
+        setState(() {
+          _initialPeekShowing = {};
+          _phase = _Phase.turn;
+        });
+      });
+    }
+  }
+
+  // ── Draw ─────────────────────────────────────────────────────────────────────
   void _drawCard() {
-    if (_drawnCard != null || _deck.isEmpty) return;
+    if (_drawnCard != null || _deck.isEmpty || _phase != _Phase.turn) return;
     setState(() {
       _drawnCard = _deck.removeLast();
+      _phase = _Phase.cardDrawn;
     });
   }
 
@@ -480,6 +552,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
       _discardStack = [..._discardStack, _DiscardEntry(card, _rAngle(), _rOffset())];
       _drawnCard = null;
     });
+    _activatePower(card);
   }
 
   void _swapWithSlot(int i) {
@@ -491,69 +564,144 @@ class _ArenaScreenState extends State<ArenaScreen> {
       _playerCards = newCards;
       _discardStack = [..._discardStack, _DiscardEntry(outCard, _rAngle(), _rOffset())];
       _drawnCard = null;
-      _playerKnownSlots = {..._playerKnownSlots, i};
+      _phase = _Phase.turn;
       _justSwappedSlots = {..._justSwappedSlots, i};
     });
-    // Remove from justSwapped after one frame so flip animation triggers
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _justSwappedSlots = _justSwappedSlots.difference({i}));
     });
   }
 
-  // ── peek power handlers ──────────────────────────────────────────────────────
-
-  void _activateOpponentPeek() {
-    _revealTimer?.cancel();
-    setState(() {
-      _opponentPeekActive = true;
-      _playerPeekActive = false;
-      _revealingOpponentSlot = null;
-      _revealingPlayerSlot = null;
+  // ── Cut ──────────────────────────────────────────────────────────────────────
+  void _handleCut() {
+    _showBanner('¡CORTE!', 'Última vuelta del rival', AppColors.danger, dur: const Duration(seconds: 2));
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) _startNextRound();
     });
   }
 
-  void _activatePlayerPeek() {
-    _revealTimer?.cancel();
-    setState(() {
-      _playerPeekActive = true;
-      _opponentPeekActive = false;
-      _revealingOpponentSlot = null;
-      _revealingPlayerSlot = null;
-    });
-  }
-
-  void _onTapOpponentCard(int i) {
-    if (!_opponentPeekActive) return;
-    _revealTimer?.cancel();
-    setState(() {
-      _revealingOpponentSlot = i;
-      _opponentPeekActive = false;
-    });
-    _revealTimer = Timer(const Duration(seconds: 3), () {
-      if (!mounted) return;
-      setState(() => _revealingOpponentSlot = null);
-    });
-  }
-
-  void _onTapPlayerCard(int i) {
-    if (_drawnCard != null) {
-      _swapWithSlot(i);
-      return;
+  // ── Powers ───────────────────────────────────────────────────────────────────
+  void _activatePower(GameCard card) {
+    if (card.isJoker) { setState(() => _phase = _Phase.turn); return; }
+    switch (card.rank) {
+      case 7:
+      case 8:
+        _showBanner('PODER ${_rankLabel(card.rank)}', 'Mirá una carta tuya', AppColors.accent);
+        Future.delayed(const Duration(milliseconds: 1700), () {
+          if (mounted) setState(() => _phase = _Phase.powerPeekOwn);
+        });
+      case 9:
+      case 10:
+        _showBanner('PODER ${_rankLabel(card.rank)}', 'Mirá una carta del rival', AppColors.warning);
+        Future.delayed(const Duration(milliseconds: 1700), () {
+          if (mounted) setState(() => _phase = _Phase.powerPeekOpponent);
+        });
+      case 11:
+      case 12:
+        _showBanner('PODER ${_rankLabel(card.rank)}', 'Intercambiá una tuya con una del rival', AppColors.success);
+        Future.delayed(const Duration(milliseconds: 1700), () {
+          if (mounted) setState(() { _phase = _Phase.powerSwapSelectOwn; _swapOwnSlot = null; });
+        });
+      case 13:
+        _showBanner('PODER REY', 'Mirá 2 cartas y decidí si intercambiar', AppColors.primary);
+        Future.delayed(const Duration(milliseconds: 1700), () {
+          if (mounted) setState(() { _phase = _Phase.powerKingPeek; _kingTargets = []; });
+        });
+      default:
+        setState(() => _phase = _Phase.turn);
     }
-    if (!_playerPeekActive) return;
+  }
+
+  // ── 7/8 own peek ─────────────────────────────────────────────────────────────
+  void _onPeekOwn(int i) {
+    if (_phase != _Phase.powerPeekOwn) return;
     _revealTimer?.cancel();
-    setState(() {
-      _revealingPlayerSlot = i;
-      _playerPeekActive = false;
-    });
+    setState(() { _revealOwnSlot = i; _phase = _Phase.turn; });
     _revealTimer = Timer(const Duration(seconds: 3), () {
-      if (!mounted) return;
-      setState(() => _revealingPlayerSlot = null);
+      if (mounted) setState(() => _revealOwnSlot = null);
     });
   }
 
+  // ── 9/10 opponent peek ───────────────────────────────────────────────────────
+  void _onPeekOpponent(int i) {
+    if (_phase != _Phase.powerPeekOpponent) return;
+    _revealTimer?.cancel();
+    setState(() { _revealOpponentSlot = i; _phase = _Phase.turn; });
+    _revealTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _revealOpponentSlot = null);
+    });
+  }
+
+  // ── J/Q swap ─────────────────────────────────────────────────────────────────
+  void _onSwapSelectOwn(int i) {
+    if (_phase != _Phase.powerSwapSelectOwn) return;
+    setState(() { _swapOwnSlot = i; _phase = _Phase.powerSwapSelectOpponent; });
+  }
+
+  void _onSwapSelectOpponent(int i) {
+    if (_phase != _Phase.powerSwapSelectOpponent) return;
+    final own = _swapOwnSlot;
+    if (own == null) return;
+    final ownCard = _playerCards[own];
+    final oppCard = _opponentCards[i];
+    final newPlayer = List<GameCard>.from(_playerCards)..[own] = oppCard;
+    final newOpponent = List<GameCard>.from(_opponentCards)..[i] = ownCard;
+    setState(() {
+      _playerCards = newPlayer;
+      _opponentCards = newOpponent;
+      _swapOwnSlot = null;
+      _phase = _Phase.turn;
+      _justSwappedSlots = {..._justSwappedSlots, own};
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _justSwappedSlots = _justSwappedSlots.difference({own}));
+    });
+    _showBanner('¡INTERCAMBIO!', '', AppColors.success);
+  }
+
+  // ── K king ───────────────────────────────────────────────────────────────────
+  void _onKingPeek(bool isOwn, int i) {
+    if (_phase != _Phase.powerKingPeek) return;
+    final target = _KingTarget(isOwn, i);
+    if (_kingTargets.contains(target)) return;
+    final newTargets = [..._kingTargets, target];
+    setState(() => _kingTargets = newTargets);
+    if (newTargets.length == 2) {
+      setState(() => _phase = _Phase.powerKingDecide);
+    }
+  }
+
+  void _kingDecide(bool doSwap) {
+    if (doSwap && _kingTargets.length == 2) {
+      final a = _kingTargets[0];
+      final b = _kingTargets[1];
+      GameCard cardA = a.isOwn ? _playerCards[a.slot] : _opponentCards[a.slot];
+      GameCard cardB = b.isOwn ? _playerCards[b.slot] : _opponentCards[b.slot];
+      final newPlayer = List<GameCard>.from(_playerCards);
+      final newOpponent = List<GameCard>.from(_opponentCards);
+      if (a.isOwn) newPlayer[a.slot] = cardB; else newOpponent[a.slot] = cardB;
+      if (b.isOwn) newPlayer[b.slot] = cardA; else newOpponent[b.slot] = cardA;
+      setState(() { _playerCards = newPlayer; _opponentCards = newOpponent; });
+      _showBanner('¡INTERCAMBIO REY!', '', AppColors.primary);
+    }
+    setState(() { _kingTargets = []; _phase = _Phase.turn; });
+  }
+
+  // ── Demo shortcuts ────────────────────────────────────────────────────────────
+  void _demoPower(int rank) {
+    if (_phase == _Phase.peekInitial) return;
+    _activatePower(GameCard.regular(Suit.spades, rank));
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final isKingPeekOwn = _phase == _Phase.powerKingPeek;
+    final opponentEye = _phase == _Phase.powerPeekOpponent;
+    final opponentKingPeeked = _kingTargets.where((t) => !t.isOwn).map((t) => t.slot).toSet();
+    final playerKingPeeked = _kingTargets.where((t) => t.isOwn).map((t) => t.slot).toSet();
+    final swapOpponent = _phase == _Phase.powerSwapSelectOpponent;
+
     return Scaffold(
       backgroundColor: AppColors.bgDeepest,
       appBar: AppBar(
@@ -564,15 +712,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
           icon: const Icon(Icons.menu_rounded, color: AppColors.textSecondary),
           onPressed: () {},
         ),
-        title: const Text(
-          '4 CARTAS BLITZ',
-          style: TextStyle(
-            color: AppColors.primary,
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 2.5,
-          ),
-        ),
+        title: const Text('4 CARTAS BLITZ', style: TextStyle(
+          color: AppColors.primary, fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: 2.5)),
         centerTitle: true,
         actions: [
           IconButton(
@@ -581,58 +722,80 @@ class _ArenaScreenState extends State<ArenaScreen> {
           ),
         ],
       ),
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [AppColors.bgBase, AppColors.bgDeepest],
+      body: Stack(children: [
+        Container(
+          width: double.infinity, height: double.infinity,
+          decoration: const BoxDecoration(gradient: LinearGradient(
+            begin: Alignment.topCenter, end: Alignment.bottomCenter,
+            colors: [AppColors.bgBase, AppColors.bgDeepest])),
+          child: SafeArea(
+            child: Column(children: [
+              _OpponentSection(
+                opponentCards: _opponentCards,
+                revealingSlot: _revealOpponentSlot,
+                peekEye: opponentEye || isKingPeekOwn,
+                kingPeekedSlots: opponentKingPeeked,
+                swapSelectable: swapOpponent,
+                onTapCard: (i) {
+                  if (_phase == _Phase.powerPeekOpponent) _onPeekOpponent(i);
+                  else if (_phase == _Phase.powerKingPeek) _onKingPeek(false, i);
+                  else if (_phase == _Phase.powerSwapSelectOpponent) _onSwapSelectOpponent(i);
+                },
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _RoundsBadge(remaining: _roundsRemaining),
+              const SizedBox(height: AppSpacing.xs),
+              _PhaseHint(phase: _phase, peeksUsed: _peeksUsed, kingCount: _kingTargets.length, swapOwnSelected: _swapOwnSlot != null),
+              const SizedBox(height: AppSpacing.xs),
+              _PowerDemoBar(onDemo: _demoPower, enabled: _phase == _Phase.turn),
+              const Spacer(),
+              _TableCenter(
+                deckCount: _deck.length,
+                discardStack: _discardStack,
+                drawnCard: _drawnCard,
+                canDraw: _phase == _Phase.turn && _drawnCard == null,
+                onDrawCard: _drawCard,
+                onDiscardDrawn: _discardDrawn,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _ActionBar(
+                phase: _phase,
+                onCut: _handleCut,
+                onMirror: () {},
+                onKingSwap: () => _kingDecide(true),
+                onKingKeep: () => _kingDecide(false),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              _PlayerHand(
+                playerCards: _playerCards,
+                phase: _phase,
+                revealingSlot: _revealOwnSlot,
+                kingPeekedSlots: playerKingPeeked,
+                justSwappedSlots: _justSwappedSlots,
+                initialPeekShowing: _initialPeekShowing,
+                swapOwnSlot: _swapOwnSlot,
+                onTapCard: (i) {
+                  if (_phase == _Phase.peekInitial) _onTapInitialPeek(i);
+                  else if (_phase == _Phase.cardDrawn) _swapWithSlot(i);
+                  else if (_phase == _Phase.powerPeekOwn) _onPeekOwn(i);
+                  else if (_phase == _Phase.powerKingPeek) _onKingPeek(true, i);
+                  else if (_phase == _Phase.powerSwapSelectOwn) _onSwapSelectOwn(i);
+                },
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ]),
           ),
         ),
-        child: SafeArea(
-          child: Column(children: [
-            _OpponentSection(
-              opponentCards: _opponentCards,
-              peekActive: _opponentPeekActive,
-              revealingSlot: _revealingOpponentSlot,
-              onTapCard: _onTapOpponentCard,
-            ),
-            const SizedBox(height: AppSpacing.base),
-            const _RoundsBadge(),
-            const SizedBox(height: AppSpacing.sm),
-            _PowerDemoBar(
-              onPeekOpponent: _activateOpponentPeek,
-              onPeekOwn: _activatePlayerPeek,
-              opponentPeekActive: _opponentPeekActive,
-              playerPeekActive: _playerPeekActive,
-            ),
-            const Spacer(),
-            _TableCenter(
-              deckCount: _deck.length,
-              discardStack: _discardStack,
-              drawnCard: _drawnCard,
-              canDraw: _drawnCard == null,
-              onDrawCard: _drawCard,
-              onDiscardDrawn: _discardDrawn,
-            ),
-            const SizedBox(height: AppSpacing.base),
-            _ActionButtons(swapMode: _drawnCard != null),
-            const SizedBox(height: AppSpacing.xl),
-            _PlayerHand(
-              playerCards: _playerCards,
-              knownSlots: _playerKnownSlots,
-              justSwappedSlots: _justSwappedSlots,
-              revealingSlot: _revealingPlayerSlot,
-              peekActive: _playerPeekActive,
-              swapMode: _drawnCard != null,
-              onTapCard: _onTapPlayerCard,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-          ]),
+        // Power banner overlay
+        Positioned.fill(
+          child: _PowerBannerOverlay(
+            visible: _bannerVisible,
+            text: _bannerText,
+            sub: _bannerSub,
+            color: _bannerColor,
+          ),
         ),
-      ),
+      ]),
     );
   }
 }
@@ -641,39 +804,35 @@ class _ArenaScreenState extends State<ArenaScreen> {
 
 class _OpponentSection extends StatelessWidget {
   final List<GameCard> opponentCards;
-  final bool peekActive;
   final int? revealingSlot;
+  final bool peekEye;
+  final Set<int> kingPeekedSlots;
+  final bool swapSelectable;
   final void Function(int) onTapCard;
 
   const _OpponentSection({
-    required this.opponentCards,
-    required this.peekActive,
-    required this.revealingSlot,
-    required this.onTapCard,
+    required this.opponentCards, required this.revealingSlot,
+    required this.peekEye, required this.kingPeekedSlots,
+    required this.swapSelectable, required this.onTapCard,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppSpacing.base, AppSpacing.base, AppSpacing.base, 0),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.base, AppSpacing.base, AppSpacing.base, 0),
       child: Column(children: [
         Container(
-          padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.base, vertical: AppSpacing.sm),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base, vertical: AppSpacing.sm),
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(color: AppColors.border),
-          ),
+            border: Border.all(color: AppColors.border)),
           child: Row(children: [
             Container(
               width: 44, height: 44,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceElevated,
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-                border: Border.all(color: AppColors.border),
-              ),
+              decoration: BoxDecoration(color: AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  border: Border.all(color: AppColors.border)),
               child: const Icon(Icons.person_rounded, color: AppColors.textMuted, size: 26),
             ),
             const SizedBox(width: AppSpacing.md),
@@ -681,33 +840,35 @@ class _OpponentSection extends StatelessWidget {
               const Text('NEON_DRIFTER', style: AppText.titleSmall),
               const SizedBox(height: 3),
               Row(children: [
-                Container(
-                  width: 7, height: 7,
-                  decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle),
-                ),
+                Container(width: 7, height: 7,
+                    decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
                 const SizedBox(width: 5),
                 Text('Pensando...', style: AppText.caption.copyWith(
-                  color: AppColors.success, fontWeight: FontWeight.w500)),
+                    color: AppColors.success, fontWeight: FontWeight.w500)),
               ]),
             ]),
           ]),
         ),
-        const SizedBox(height: AppSpacing.md),
+        const SizedBox(height: AppSpacing.sm),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: List.generate(4, (i) {
             final isRevealing = revealingSlot == i;
+            final isKingPeeked = kingPeekedSlots.contains(i);
+            final showFace = isRevealing || isKingPeeked;
+            final tappable = peekEye && !showFace || swapSelectable;
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs + 1),
               child: GestureDetector(
-                onTap: (peekActive && !isRevealing) ? () => onTapCard(i) : null,
+                onTap: tappable ? () => onTapCard(i) : null,
                 child: _FlippableCard(
-                  showFace: isRevealing,
+                  showFace: showFace,
                   front: _CardFace(card: opponentCards[i], width: 68),
                   back: _CardBack(
                     width: 68,
-                    eyeActive: peekActive,
+                    eyeActive: peekEye && !isKingPeeked,
                     eyeColor: AppColors.warning,
+                    selected: swapSelectable,
                   ),
                 ),
               ),
@@ -722,109 +883,106 @@ class _OpponentSection extends StatelessWidget {
 // ─── Rounds Badge ─────────────────────────────────────────────────────────────
 
 class _RoundsBadge extends StatelessWidget {
-  const _RoundsBadge();
+  final int remaining;
+  const _RoundsBadge({required this.remaining});
 
   @override
   Widget build(BuildContext context) {
     const purple = AppColors.cardInkJoker;
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.xl2, vertical: AppSpacing.sm + 2),
+    final isLast = remaining == 1;
+    final label = isLast ? '⚡ ÚLTIMA RONDA ⚡' : 'RONDAS RESTANTES: $remaining';
+    final color = isLast ? AppColors.danger : purple;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.xs + 2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadius.pill),
-        border: Border.all(color: purple, width: 1.5),
-        boxShadow: [BoxShadow(color: purple.withValues(alpha: 0.28), blurRadius: 14)],
+        border: Border.all(color: color, width: 1.5),
+        boxShadow: [BoxShadow(color: color.withValues(alpha: .28), blurRadius: 14)],
       ),
-      child: const Text(
-        'RONDAS RESTANTES: 3',
-        style: TextStyle(
-          color: purple, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 1.5),
-      ),
+      child: Text(label, style: TextStyle(
+          color: color, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
     );
+  }
+}
+
+// ─── Phase Hint ──────────────────────────────────────────────────────────────
+
+class _PhaseHint extends StatelessWidget {
+  final _Phase phase;
+  final int peeksUsed;
+  final int kingCount;
+  final bool swapOwnSelected;
+  const _PhaseHint({required this.phase, required this.peeksUsed, required this.kingCount, required this.swapOwnSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    String text = '';
+    Color color = AppColors.textMuted;
+    switch (phase) {
+      case _Phase.peekInitial:
+        text = peeksUsed == 0 ? 'Elegí 2 cartas para memorizar' : peeksUsed == 1 ? 'Elegí 1 carta más (${2 - peeksUsed} restante)' : 'Memorizalas bien... ⏳';
+        color = AppColors.accent;
+      case _Phase.powerPeekOwn:
+        text = 'PODER: Tocá una carta tuya para ver';
+        color = AppColors.accent;
+      case _Phase.powerPeekOpponent:
+        text = 'PODER: Tocá una carta del rival para ver';
+        color = AppColors.warning;
+      case _Phase.powerSwapSelectOwn:
+        text = 'PODER: Elegí una de TUS cartas';
+        color = AppColors.success;
+      case _Phase.powerSwapSelectOpponent:
+        text = 'PODER: Ahora tocá una carta del RIVAL';
+        color = AppColors.success;
+      case _Phase.powerKingPeek:
+        text = 'REY: Tocá 2 cartas para ver ($kingCount/2)';
+        color = AppColors.primary;
+      case _Phase.powerKingDecide:
+        text = '¿Intercambiás estas 2 cartas?';
+        color = AppColors.primary;
+      case _Phase.cardDrawn:
+        text = 'Tocá una carta tuya para intercambiar · o tirá la robada';
+        color = AppColors.textSecondary;
+      default:
+        text = '';
+    }
+    if (text.isEmpty) return const SizedBox.shrink();
+    return Text(text, style: AppText.caption.copyWith(color: color, fontWeight: FontWeight.w500),
+        textAlign: TextAlign.center);
   }
 }
 
 // ─── Power Demo Bar ───────────────────────────────────────────────────────────
 
 class _PowerDemoBar extends StatelessWidget {
-  final VoidCallback onPeekOpponent;
-  final VoidCallback onPeekOwn;
-  final bool opponentPeekActive;
-  final bool playerPeekActive;
-
-  const _PowerDemoBar({
-    required this.onPeekOpponent,
-    required this.onPeekOwn,
-    required this.opponentPeekActive,
-    required this.playerPeekActive,
-  });
+  final void Function(int rank) onDemo;
+  final bool enabled;
+  const _PowerDemoBar({required this.onDemo, required this.enabled});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text('DEMO  ', style: AppText.caption.copyWith(
-              fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w700)),
-          _DemoChip(
-            label: '9/10: espiar rival',
-            icon: Icons.visibility_outlined,
-            color: AppColors.warning,
-            active: opponentPeekActive,
-            onTap: onPeekOpponent,
+    const powers = [(7, '7/8', AppColors.accent), (9, '9/10', AppColors.warning),
+      (11, 'J/Q', AppColors.success), (13, 'REY', AppColors.primary)];
+    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Text('DEMO  ', style: AppText.caption.copyWith(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w700)),
+      ...powers.map((p) => Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: GestureDetector(
+          onTap: enabled ? () => onDemo(p.$1) : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              border: Border.all(color: enabled ? p.$3 : AppColors.border, width: 1),
+            ),
+            child: Text(p.$2, style: TextStyle(
+                color: enabled ? p.$3 : AppColors.textMuted, fontSize: 9, fontWeight: FontWeight.w700)),
           ),
-          const SizedBox(width: AppSpacing.sm),
-          _DemoChip(
-            label: '7/8: espiar propio',
-            icon: Icons.visibility_outlined,
-            color: AppColors.accent,
-            active: playerPeekActive,
-            onTap: onPeekOwn,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DemoChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-  final bool active;
-  final VoidCallback onTap;
-
-  const _DemoChip({
-    required this.label, required this.icon, required this.color,
-    required this.active, required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: active ? color.withValues(alpha: 0.18) : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          border: Border.all(color: active ? color : AppColors.border, width: active ? 1.5 : 1.0),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: active ? color : AppColors.textMuted, size: 11),
-          const SizedBox(width: 4),
-          Text(label, style: TextStyle(
-            color: active ? color : AppColors.textMuted,
-            fontSize: 10,
-            fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-            letterSpacing: 0.3,
-          )),
-        ]),
-      ),
-    );
+      )),
+    ]);
   }
 }
 
@@ -839,53 +997,33 @@ class _TableCenter extends StatelessWidget {
   final VoidCallback onDiscardDrawn;
 
   const _TableCenter({
-    required this.deckCount,
-    required this.discardStack,
-    required this.drawnCard,
-    required this.canDraw,
-    required this.onDrawCard,
-    required this.onDiscardDrawn,
+    required this.deckCount, required this.discardStack, required this.drawnCard,
+    required this.canDraw, required this.onDrawCard, required this.onDiscardDrawn,
   });
 
   @override
   Widget build(BuildContext context) {
     final hasDraw = drawnCard != null;
-
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        // ── MAZO ──────────────────────────────────────────────────────────────
         Column(children: [
           Stack(clipBehavior: Clip.none, children: [
-            _DeckCard(
-              width: hasDraw ? 80 : 100,
-              count: deckCount,
-              onTap: onDrawCard,
-              canDraw: canDraw,
-            ),
+            _DeckCard(width: hasDraw ? 80 : 100, count: deckCount, onTap: onDrawCard, canDraw: canDraw),
             Positioned(
               top: -6, right: -8,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
+              child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppColors.accent,
-                  borderRadius: BorderRadius.circular(AppRadius.pill),
-                  boxShadow: [BoxShadow(color: AppColors.accent.withValues(alpha: 0.5), blurRadius: 8)],
-                ),
-                child: Text(
-                  '$deckCount',
-                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800),
-                ),
+                decoration: BoxDecoration(color: AppColors.accent, borderRadius: BorderRadius.circular(AppRadius.pill),
+                    boxShadow: [BoxShadow(color: AppColors.accent.withValues(alpha: .5), blurRadius: 8)]),
+                child: Text('$deckCount', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
               ),
             ),
           ]),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.xs),
           Text('MAZO', style: AppText.caption),
         ]),
-
-        // ── CARTA ROBADA ──────────────────────────────────────────────────────
         if (hasDraw) ...[
           const SizedBox(width: AppSpacing.md),
           Column(children: [
@@ -894,35 +1032,26 @@ class _TableCenter extends StatelessWidget {
               tween: Tween(begin: 0.0, end: 1.0),
               duration: const Duration(milliseconds: 280),
               curve: Curves.elasticOut,
-              builder: (ctx, scale, child) =>
-                  Transform.scale(scale: scale, child: child),
+              builder: (ctx, scale, child) => Transform.scale(scale: scale, child: child),
               child: GestureDetector(
                 onTap: onDiscardDrawn,
                 child: Container(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(AppRadius.card),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.55),
-                        blurRadius: 22, spreadRadius: 3),
-                    ],
+                    boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .55), blurRadius: 22, spreadRadius: 3)],
                   ),
                   child: _CardFace(card: drawnCard!, width: 90),
                 ),
               ),
             ),
-            const SizedBox(height: AppSpacing.sm),
-            Text('TIRAR', style: AppText.caption.copyWith(
-                color: AppColors.primary, fontWeight: FontWeight.w700)),
+            const SizedBox(height: AppSpacing.xs),
+            Text('TIRAR', style: AppText.caption.copyWith(color: AppColors.primary, fontWeight: FontWeight.w700)),
           ]),
         ],
-
         SizedBox(width: hasDraw ? AppSpacing.md : AppSpacing.xl2 + AppSpacing.base),
-
-        // ── DESCARTE ──────────────────────────────────────────────────────────
         Column(children: [
           _DiscardPile(stack: discardStack, width: hasDraw ? 90 : 100),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.xs),
           Text('DESCARTE', style: AppText.caption.copyWith(color: AppColors.primary)),
         ]),
       ],
@@ -930,82 +1059,76 @@ class _TableCenter extends StatelessWidget {
   }
 }
 
-// ─── Action Buttons ───────────────────────────────────────────────────────────
+// ─── Action Bar ───────────────────────────────────────────────────────────────
 
-class _ActionButtons extends StatelessWidget {
-  final bool swapMode;
-  const _ActionButtons({this.swapMode = false});
+class _ActionBar extends StatelessWidget {
+  final _Phase phase;
+  final VoidCallback onCut;
+  final VoidCallback onMirror;
+  final VoidCallback onKingSwap;
+  final VoidCallback onKingKeep;
+
+  const _ActionBar({
+    required this.phase, required this.onCut,
+    required this.onMirror, required this.onKingSwap, required this.onKingKeep,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base),
-      child: swapMode
-          ? Center(
-              child: Text(
-                'Tocá una de tus cartas para intercambiar',
-                style: AppText.caption.copyWith(
-                    color: AppColors.primary, fontWeight: FontWeight.w500),
-                textAlign: TextAlign.center,
-              ),
-            )
-          : Row(children: [
-              Expanded(child: _GameButton(
-                label: 'CORTAR',
-                icon: Icons.content_cut_rounded,
-                color: AppColors.danger,
-                solid: false,
-                onTap: () {},
-              )),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(child: _GameButton(
-                label: '¡ESPEJO!',
-                icon: Icons.copy_all_rounded,
-                color: AppColors.success,
-                solid: true,
-                onTap: () {},
-              )),
-            ]),
+      child: switch (phase) {
+        _Phase.powerKingDecide => Row(children: [
+          Expanded(child: _Btn(label: '¡INTERCAMBIAR!', icon: Icons.swap_horiz_rounded, color: AppColors.primary, solid: true, onTap: onKingSwap)),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(child: _Btn(label: 'DEJAR ASÍ', icon: Icons.close_rounded, color: AppColors.danger, solid: false, onTap: onKingKeep)),
+        ]),
+        _Phase.cardDrawn => Center(child: Text(
+          'Tocá una carta tuya para intercambiar',
+          style: AppText.caption.copyWith(color: AppColors.primary, fontWeight: FontWeight.w500),
+          textAlign: TextAlign.center)),
+        _Phase.peekInitial ||
+        _Phase.powerPeekOwn ||
+        _Phase.powerPeekOpponent ||
+        _Phase.powerSwapSelectOwn ||
+        _Phase.powerSwapSelectOpponent ||
+        _Phase.powerKingPeek => const SizedBox(height: 52),
+        _ => Row(children: [
+          Expanded(child: _Btn(label: 'CORTAR', icon: Icons.content_cut_rounded, color: AppColors.danger, solid: false, onTap: onCut)),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(child: _Btn(label: '¡ESPEJO!', icon: Icons.copy_all_rounded, color: AppColors.success, solid: true, onTap: onMirror)),
+        ]),
+      },
     );
   }
 }
 
-class _GameButton extends StatelessWidget {
+class _Btn extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color color;
   final bool solid;
   final VoidCallback onTap;
-
-  const _GameButton({
-    required this.label, required this.icon, required this.color,
-    required this.solid, required this.onTap,
-  });
+  const _Btn({required this.label, required this.icon, required this.color, required this.solid, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final bg = solid ? color : color.withValues(alpha: 0.15);
+    final bg = solid ? color : color.withValues(alpha: .15);
     final fg = solid ? AppColors.bgDeepest : color;
-
     return GestureDetector(
       onTap: onTap,
       child: Container(
         height: 52,
         decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(AppRadius.md),
+          color: bg, borderRadius: BorderRadius.circular(AppRadius.md),
           border: Border.all(color: color, width: 1.5),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.30), blurRadius: 12)],
+          boxShadow: [BoxShadow(color: color.withValues(alpha: .30), blurRadius: 12)],
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: fg, size: 18),
-            const SizedBox(width: 8),
-            Text(label, style: TextStyle(
-              color: fg, fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: 1.2)),
-          ],
-        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, color: fg, size: 18),
+          const SizedBox(width: 8),
+          Text(label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1.1)),
+        ]),
       ),
     );
   }
@@ -1015,62 +1138,64 @@ class _GameButton extends StatelessWidget {
 
 class _PlayerHand extends StatelessWidget {
   final List<GameCard> playerCards;
-  final Set<int> knownSlots;
-  final Set<int> justSwappedSlots;
+  final _Phase phase;
   final int? revealingSlot;
-  final bool peekActive;
-  final bool swapMode;
+  final Set<int> kingPeekedSlots;
+  final Set<int> justSwappedSlots;
+  final Set<int> initialPeekShowing;
+  final int? swapOwnSlot;
   final void Function(int) onTapCard;
 
   const _PlayerHand({
-    required this.playerCards,
-    required this.knownSlots,
-    required this.justSwappedSlots,
-    required this.revealingSlot,
-    required this.peekActive,
-    required this.swapMode,
-    required this.onTapCard,
+    required this.playerCards, required this.phase, required this.revealingSlot,
+    required this.kingPeekedSlots, required this.justSwappedSlots,
+    required this.initialPeekShowing, required this.swapOwnSlot, required this.onTapCard,
   });
 
   @override
   Widget build(BuildContext context) {
     const purple = AppColors.cardInkJoker;
-
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(4, (i) {
         final card = playerCards[i];
-        final isKnown = knownSlots.contains(i);
-        final justSwapped = justSwappedSlots.contains(i);
         final isRevealing = revealingSlot == i;
-        // Card is visible if known (and not in the brief "just swapped" moment)
-        // or temporarily revealed by power
-        final showFace = (isKnown && !justSwapped) || isRevealing;
+        final isKingPeeked = kingPeekedSlots.contains(i);
+        final isInitialPeek = initialPeekShowing.contains(i);
+        final justSwapped = justSwappedSlots.contains(i);
+        final showFace = isRevealing || isKingPeeked || (isInitialPeek && !justSwapped);
 
-        // Border color signals
+        final isSwapOwn = swapOwnSlot == i;
+        final eyeActive = (phase == _Phase.powerPeekOwn || (phase == _Phase.powerKingPeek && !isKingPeeked));
+        final tappable = switch (phase) {
+          _Phase.peekInitial => !isInitialPeek,
+          _Phase.cardDrawn => true,
+          _Phase.powerPeekOwn => !isRevealing,
+          _Phase.powerKingPeek => !isKingPeeked,
+          _Phase.powerSwapSelectOwn => true,
+          _ => false,
+        };
+
         Color borderColor;
-        if (swapMode) {
-          borderColor = AppColors.primary; // gold = swap available
-        } else if (peekActive) {
-          borderColor = AppColors.accent;
-        } else {
-          borderColor = purple;
-        }
+        if (isSwapOwn) borderColor = AppColors.primary;
+        else if (phase == _Phase.cardDrawn) borderColor = AppColors.accent;
+        else if (phase == _Phase.peekInitial) borderColor = AppColors.accent;
+        else borderColor = purple;
 
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs + 1),
           child: GestureDetector(
-            onTap: () => onTapCard(i),
+            onTap: tappable ? () => onTapCard(i) : null,
             child: _FlippableCard(
-              // Key changes when card changes → new widget instance for fresh flip
-              key: ValueKey('player_${i}_${card.toString()}'),
+              key: ValueKey('p_${i}_${card.toString()}'),
               showFace: showFace,
               front: _CardFace(card: card, width: 72),
               back: _CardBack(
                 width: 72,
                 borderColor: borderColor,
-                eyeActive: peekActive && !isKnown,
+                eyeActive: eyeActive,
                 eyeColor: AppColors.accent,
+                selected: isSwapOwn,
               ),
             ),
           ),
