@@ -278,7 +278,7 @@ class _CodeField extends StatelessWidget {
           style: AppText.hero.copyWith(fontSize: 28, letterSpacing: 6),
           textAlign: TextAlign.center,
           textCapitalization: TextCapitalization.characters,
-          maxLength: 8,
+          maxLength: 6,
           decoration: InputDecoration(
             hintText: 'XKQZ47',
             hintStyle: AppText.hero.copyWith(
