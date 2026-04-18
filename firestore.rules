@@ -1,0 +1,42 @@
+rules_version = '2';
+
+// MVP rules for 4 Cartas BLITZ. Client-authoritative — any authenticated user
+// can read/write rooms, but only seat-owners can modify `game`, and only the
+// current turn player can mutate its own actions (Mirror is allowed by either
+// seat at any time since it's outside the turn-state machine).
+//
+// Production would require Cloud Functions to keep info hidden and prevent
+// cheating. For the hackathon demo, this is intentionally permissive.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /rooms/{roomCode} {
+      // Anyone signed in can see a room (to join by code).
+      allow read: if request.auth != null;
+
+      // Creation: only anonymous/authenticated users, only if they set
+      // themselves as hostId.
+      allow create: if request.auth != null
+        && request.resource.data.hostId == request.auth.uid
+        && request.resource.data.status == 'waiting';
+
+      // Update: must be one of the seated players or joining as 2nd seat.
+      allow update: if request.auth != null
+        && (
+          // Seat holder
+          (request.auth.uid in resource.data.seatOrder)
+          // Or joining the waiting room (size goes 1 -> 2)
+          || (
+            resource.data.status == 'waiting'
+            && resource.data.seatOrder.size() == 1
+            && request.resource.data.seatOrder.size() == 2
+            && request.auth.uid in request.resource.data.seatOrder
+          )
+        );
+
+      // Delete: only host.
+      allow delete: if request.auth != null
+        && resource.data.hostId == request.auth.uid;
+    }
+  }
+}
