@@ -2,10 +2,19 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../core/design_tokens.dart';
 import '../core/typography.dart';
+import '../data/room_doc.dart';
 import '../engine/models/card.dart';
+import '../engine/models/game_phase.dart';
+import '../engine/models/game_state.dart';
+import '../engine/models/pending_action.dart';
+import '../state/auth_providers.dart';
+import '../state/game_controller.dart';
+import '../state/room_providers.dart';
 
 // ─── Phase ────────────────────────────────────────────────────────────────────
 
@@ -43,20 +52,6 @@ class _DiscardEntry {
   const _DiscardEntry(this.card, this.angle, this.offset);
 }
 
-// ─── Deck Builder ─────────────────────────────────────────────────────────────
-
-List<GameCard> _buildFullDeck() {
-  final cards = <GameCard>[];
-  for (final suit in Suit.values) {
-    for (int rank = 1; rank <= 13; rank++) {
-      cards.add(GameCard.regular(suit, rank));
-    }
-  }
-  cards.add(const GameCard.joker());
-  cards.add(const GameCard.joker());
-  return cards;
-}
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 String _suitSymbol(Suit s) {
@@ -80,11 +75,6 @@ Color _suitColor(Suit s) =>
     (s == Suit.hearts || s == Suit.diamonds)
         ? AppColors.cardInkRed
         : AppColors.cardInkBlack;
-
-int _totalRoundsFor(GameCard firstDiscard) {
-  if (firstDiscard.isJoker) return 1;
-  return firstDiscard.rank.clamp(1, 5);
-}
 
 // ─── Card Face ────────────────────────────────────────────────────────────────
 
@@ -162,9 +152,12 @@ class _CardBack extends StatelessWidget {
   final Color eyeColor;
   final bool selected; // J/Q swap selected
 
+  final Color patternColor;
+
   const _CardBack({
     this.width = 72, this.borderColor, this.eyeActive = false,
     this.eyeColor = AppColors.accent, this.selected = false,
+    this.patternColor = AppColors.cardBackPattern,
   });
 
   @override
@@ -193,7 +186,27 @@ class _CardBack extends StatelessWidget {
           ? Center(child: Icon(Icons.visibility_outlined, color: eyeColor, size: width * .46))
           : selected
               ? Center(child: Icon(Icons.swap_horiz_rounded, color: AppColors.primary, size: width * .46))
-              : null,
+              : Padding(
+                  padding: EdgeInsets.all(width * 0.09),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(AppRadius.xs),
+                      border: Border.all(
+                        color: patternColor.withValues(alpha: 0.40),
+                        width: 1.0,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text('♦',
+                        style: TextStyle(
+                          color: patternColor.withValues(alpha: 0.45),
+                          fontSize: width * 0.22,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
     );
   }
 }
@@ -390,343 +403,486 @@ class _PowerBannerOverlay extends StatelessWidget {
 
 // ─── Arena Screen ─────────────────────────────────────────────────────────────
 
-class ArenaScreen extends StatefulWidget {
-  const ArenaScreen({super.key});
+class ArenaScreen extends ConsumerStatefulWidget {
+  const ArenaScreen({super.key, required this.roomCode});
+  final String roomCode;
+
   @override
-  State<ArenaScreen> createState() => _ArenaScreenState();
+  ConsumerState<ArenaScreen> createState() => _ArenaScreenState();
 }
 
-class _ArenaScreenState extends State<ArenaScreen> {
-  final _random = math.Random();
-
-  // ── game ─────────────────────────────────────────────────────────────────────
-  _Phase _phase = _Phase.peekInitial;
-  late List<GameCard> _deck;
-  late List<_DiscardEntry> _discardStack;
-  late List<GameCard> _playerCards;
-  late List<GameCard> _opponentCards;
-  int _roundsRemaining = 3;
-  GameCard? _drawnCard;
-
-  // ── initial peek ─────────────────────────────────────────────────────────────
-  Set<int> _initialPeekShowing = {};
-  int _peeksUsed = 0;
+class _ArenaScreenState extends ConsumerState<ArenaScreen> {
+  // ── UI-only state (NOT in GameState; resets per player/phase) ──────────────
+  final Set<int> _initialPeekShowing = {};
   Timer? _peekHideTimer;
 
-  // ── known / flip state ───────────────────────────────────────────────────────
-  Set<int> _justSwappedSlots = {};
-
-  // ── 3-second temporary reveals ───────────────────────────────────────────────
   int? _revealOwnSlot;
   int? _revealOpponentSlot;
   Timer? _revealTimer;
 
-  // ── power states ─────────────────────────────────────────────────────────────
-  int? _swapOwnSlot;          // J/Q: selected own slot
-  List<_KingTarget> _kingTargets = [];   // K: peeked targets (1 own + 1 opponent)
+  final Set<int> _justSwappedSlots = {};
+  int? _swapOwnSlot;
 
-  // ── opponent turn ─────────────────────────────────────────────────────────────
-  bool _isOpponentTurn = false;
-  Timer? _opponentTimer;
-
-  // ── banner ────────────────────────────────────────────────────────────────────
+  // Banner overlay
   bool _bannerVisible = false;
   String _bannerText = '';
   String _bannerSub = '';
   Color _bannerColor = AppColors.primary;
 
-  @override
-  void initState() { super.initState(); _initRound(); }
+  // Transition detection
+  String? _prevPendingKey;
+  GamePhase? _prevPhase;
+  String? _prevCutterId;
+
+  // Settings
+  double _musicVolume = 0.8;
+  double _fxVolume = 1.0;
+  bool _hapticEnabled = true;
 
   @override
   void dispose() {
     _peekHideTimer?.cancel();
     _revealTimer?.cancel();
-    _opponentTimer?.cancel();
     super.dispose();
   }
 
-  // ── Init ─────────────────────────────────────────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
-  void _initRound() {
-    final cards = _buildFullDeck()..shuffle(_random);
-    final pCards = List<GameCard>.from(cards.sublist(0, 4));
-    final oCards = List<GameCard>.from(cards.sublist(4, 8));
-    final firstDiscard = cards[8];
-    final deck = List<GameCard>.from(cards.sublist(9));
-    final total = _totalRoundsFor(firstDiscard);
-    setState(() {
-      _playerCards = pCards;
-      _opponentCards = oCards;
-      _deck = deck;
-      _discardStack = [_DiscardEntry(firstDiscard, _rAngle(), _rOffset())];
-      _roundsRemaining = total;
-      _phase = _Phase.peekInitial;
-      _drawnCard = null;
-      _initialPeekShowing = {};
-      _peeksUsed = 0;
-      _justSwappedSlots = {};
-      _swapOwnSlot = null;
-      _kingTargets = [];
-      _revealOwnSlot = null;
-      _revealOpponentSlot = null;
-      _isOpponentTurn = false;
-    });
+  GameController _ctrl() =>
+      ref.read(gameControllerProvider(widget.roomCode));
+
+  String _pendingKey(PendingAction? p) {
+    if (p == null) return '';
+    return switch (p) {
+      PendingPeekOwn() => 'peekOwn-${p.rank}',
+      PendingPeekOpponent() => 'peekOpp-${p.rank}',
+      PendingSwap() => 'swap-${p.rank}',
+      PendingKingPeek() => 'king-${p.peekedSlots.length}',
+    };
   }
 
-  void _startNextRound() {
-    final rem = _roundsRemaining - 1;
-    if (rem <= 0) {
-      _showBanner('¡PARTIDA TERMINADA!', '', AppColors.primary);
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) _initRound();
-      });
-      return;
+  _Phase _derivePhase(GameState g, String myUid) {
+    if (g.phase == GamePhase.peekInitial) return _Phase.peekInitial;
+    if (g.turnPlayerId != myUid) return _Phase.turn;
+    final pending = g.pending;
+    if (pending is PendingPeekOwn) return _Phase.powerPeekOwn;
+    if (pending is PendingPeekOpponent) return _Phase.powerPeekOpponent;
+    if (pending is PendingSwap) {
+      return _swapOwnSlot == null
+          ? _Phase.powerSwapSelectOwn
+          : _Phase.powerSwapSelectOpponent;
     }
-    final cards = _buildFullDeck()..shuffle(_random);
-    final pCards = List<GameCard>.from(cards.sublist(0, 4));
-    final oCards = List<GameCard>.from(cards.sublist(4, 8));
-    final firstDiscard = cards[8];
-    final deck = List<GameCard>.from(cards.sublist(9));
+    if (pending is PendingKingPeek) {
+      return pending.isComplete
+          ? _Phase.powerKingDecide
+          : _Phase.powerKingPeek;
+    }
+    if (g.drawnCard != null) return _Phase.cardDrawn;
+    return _Phase.turn;
+  }
+
+  List<_DiscardEntry> _discardEntries(List<GameCard> discard) {
+    return [
+      for (var i = 0; i < discard.length; i++)
+        _DiscardEntry(
+          discard[i],
+          _stableAngle(i, discard[i]),
+          _stableOffset(i, discard[i]),
+        ),
+    ];
+  }
+
+  double _stableAngle(int i, GameCard c) {
+    final seed = (i * 31 + c.hashCode) & 0xFFFF;
+    return ((seed / 0xFFFF) - 0.5) * 0.52;
+  }
+
+  Offset _stableOffset(int i, GameCard c) {
+    final sx = ((i * 37 + c.hashCode) & 0xFFFF) / 0xFFFF;
+    final sy = (((i * 53 + c.hashCode) ^ 0x1234) & 0xFFFF) / 0xFFFF;
+    return Offset((sx - 0.5) * 14, (sy - 0.5) * 10);
+  }
+
+  void _showBanner(
+    String text,
+    String sub,
+    Color color, {
+    Duration dur = const Duration(milliseconds: 1600),
+  }) {
+    if (!mounted) return;
     setState(() {
-      _playerCards = pCards;
-      _opponentCards = oCards;
-      _deck = deck;
-      _discardStack = [_DiscardEntry(firstDiscard, _rAngle(), _rOffset())];
-      _roundsRemaining = rem;
-      _phase = _Phase.peekInitial;
-      _drawnCard = null;
-      _initialPeekShowing = {};
-      _peeksUsed = 0;
-      _justSwappedSlots = {};
-      _swapOwnSlot = null;
-      _kingTargets = [];
-      _revealOwnSlot = null;
-      _revealOpponentSlot = null;
-      _isOpponentTurn = false;
+      _bannerVisible = true;
+      _bannerText = text;
+      _bannerSub = sub;
+      _bannerColor = color;
+    });
+    Future.delayed(dur, () {
+      if (mounted) setState(() => _bannerVisible = false);
     });
   }
 
-  // ── Random helpers ────────────────────────────────────────────────────────────
-  double _rAngle() => (_random.nextDouble() - 0.5) * 0.52;
-  Offset _rOffset() => Offset((_random.nextDouble() - 0.5) * 14, (_random.nextDouble() - 0.5) * 10);
-
-  // ── End player turn (triggers opponent "thinking") ────────────────────────────
-  void _endPlayerTurn() {
-    _opponentTimer?.cancel();
-    setState(() { _phase = _Phase.turn; _isOpponentTurn = true; });
-    _opponentTimer = Timer(const Duration(milliseconds: 1800), () {
-      if (mounted) setState(() => _isOpponentTurn = false);
-    });
+  Future<void> _runAction(Future<void> Function() op) async {
+    try {
+      await op();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    }
   }
 
-  // ── Banner ───────────────────────────────────────────────────────────────────
-  void _showBanner(String text, String sub, Color color, {Duration dur = const Duration(milliseconds: 1600)}) {
-    setState(() { _bannerVisible = true; _bannerText = text; _bannerSub = sub; _bannerColor = color; });
-    Future.delayed(dur, () { if (mounted) setState(() => _bannerVisible = false); });
+  void _onStateChange(
+      GameState? prev, GameState next, String myUid, bool isHost) {
+    final prevPending = _prevPendingKey;
+    final nextPending = _pendingKey(next.pending);
+    final prevPhase = _prevPhase;
+
+    if (prevPending != nextPending &&
+        next.pending != null &&
+        next.turnPlayerId == myUid) {
+      _announcePower(next.pending!);
+    }
+
+    if (_prevCutterId == null && next.cutterId != null) {
+      final cutter =
+          next.cutterId == myUid ? 'Vos cortaste' : 'Cortó el rival';
+      _showBanner('¡CORTE!', cutter, AppColors.danger,
+          dur: const Duration(seconds: 2));
+    }
+
+    if (isHost && next.phase != prevPhase) {
+      if (next.phase == GamePhase.reveal) {
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          if (!mounted) return;
+          _runAction(() => _ctrl().advanceReveal());
+        });
+      } else if (next.phase == GamePhase.roundEnd) {
+        Future.delayed(const Duration(milliseconds: 1200), () {
+          if (!mounted) return;
+          _runAction(() => _ctrl().nextRound());
+        });
+      }
+    }
+
+    _prevPendingKey = nextPending;
+    _prevPhase = next.phase;
+    _prevCutterId = next.cutterId;
   }
 
-  // ── Initial peek ─────────────────────────────────────────────────────────────
-  void _onTapInitialPeek(int i) {
-    if (_initialPeekShowing.contains(i)) return; // already showing
-    if (_peeksUsed >= 2) return; // already used both peeks
+  void _announcePower(PendingAction p) {
+    switch (p) {
+      case PendingPeekOwn():
+        _showBanner(
+            'PODER ${_rankLabel(p.rank)}', 'Mirá una carta tuya', AppColors.accent);
+      case PendingPeekOpponent():
+        _showBanner('PODER ${_rankLabel(p.rank)}', 'Mirá una carta del rival',
+            AppColors.warning);
+      case PendingSwap():
+        _showBanner('PODER ${_rankLabel(p.rank)}',
+            'Intercambiá una tuya con una del rival', AppColors.success);
+      case PendingKingPeek():
+        if (!p.isComplete) {
+          _showBanner(
+              'PODER REY',
+              'Mirá 1 tuya y 1 del rival, decidí si intercambiar',
+              AppColors.primary);
+        }
+    }
+  }
+
+  // ── Initial peek ───────────────────────────────────────────────────────────
+
+  void _onTapInitialPeek(int i, String myUid) {
+    if (_initialPeekShowing.contains(i)) return;
+    if (_initialPeekShowing.length >= 2) return;
 
     _peekHideTimer?.cancel();
-    final newShowing = {..._initialPeekShowing, i};
-    final newPeeks = _peeksUsed + 1;
+    setState(() => _initialPeekShowing.add(i));
 
-    setState(() {
-      _initialPeekShowing = newShowing;
-      _peeksUsed = newPeeks;
-    });
-
-    if (newPeeks == 2) {
-      // Both selected: hide after 3s and start game
+    if (_initialPeekShowing.length == 2) {
       _peekHideTimer = Timer(const Duration(seconds: 3), () {
         if (!mounted) return;
-        setState(() {
-          _initialPeekShowing = {};
-          _phase = _Phase.turn;
-        });
+        setState(() => _initialPeekShowing.clear());
+        _runAction(() => _ctrl().completeInitialPeek(myUid));
       });
     }
   }
 
-  // ── Draw ─────────────────────────────────────────────────────────────────────
-  void _drawCard() {
-    if (_drawnCard != null || _deck.isEmpty || _phase != _Phase.turn || _isOpponentTurn) return;
-    setState(() {
-      _drawnCard = _deck.removeLast();
-      _phase = _Phase.cardDrawn;
-    });
-  }
+  // ── Turn actions ───────────────────────────────────────────────────────────
 
-  void _discardDrawn() {
-    final card = _drawnCard;
-    if (card == null) return;
-    setState(() {
-      _discardStack = [..._discardStack, _DiscardEntry(card, _rAngle(), _rOffset())];
-      _drawnCard = null;
-    });
-    _activatePower(card);
-  }
+  void _drawCard(String myUid) =>
+      _runAction(() => _ctrl().drawFromDeck(myUid));
 
-  void _swapWithSlot(int i) {
-    final drawn = _drawnCard;
-    if (drawn == null) return;
-    final outCard = _playerCards[i];
-    final newCards = List<GameCard>.from(_playerCards)..[i] = drawn;
-    setState(() {
-      _playerCards = newCards;
-      _discardStack = [..._discardStack, _DiscardEntry(outCard, _rAngle(), _rOffset())];
-      _drawnCard = null;
-      _justSwappedSlots = {..._justSwappedSlots, i};
-    });
-    _endPlayerTurn();
+  void _discardDrawn(String myUid) =>
+      _runAction(() => _ctrl().discardDrawn(myUid));
+
+  Future<void> _swapWithSlot(int i, String myUid) async {
+    setState(() => _justSwappedSlots.add(i));
+    await _runAction(() => _ctrl().swap(myUid, i));
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _justSwappedSlots = _justSwappedSlots.difference({i}));
+      if (mounted) setState(() => _justSwappedSlots.remove(i));
     });
   }
 
-  // ── Cut ──────────────────────────────────────────────────────────────────────
-  void _handleCut() {
-    _showBanner('¡CORTE!', 'Última vuelta del rival', AppColors.danger, dur: const Duration(seconds: 2));
-    _opponentTimer?.cancel();
-    setState(() => _isOpponentTurn = true);
-    _opponentTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) { setState(() => _isOpponentTurn = false); _startNextRound(); }
-    });
-  }
+  void _handleCut(String myUid) => _runAction(() => _ctrl().cut(myUid));
 
-  // ── Powers ───────────────────────────────────────────────────────────────────
-  void _activatePower(GameCard card) {
-    if (card.isJoker) { _endPlayerTurn(); return; }
-    switch (card.rank) {
-      case 7:
-      case 8:
-        _showBanner('PODER ${_rankLabel(card.rank)}', 'Mirá una carta tuya', AppColors.accent);
-        Future.delayed(const Duration(milliseconds: 1700), () {
-          if (mounted) setState(() => _phase = _Phase.powerPeekOwn);
-        });
-      case 9:
-      case 10:
-        _showBanner('PODER ${_rankLabel(card.rank)}', 'Mirá una carta del rival', AppColors.warning);
-        Future.delayed(const Duration(milliseconds: 1700), () {
-          if (mounted) setState(() => _phase = _Phase.powerPeekOpponent);
-        });
-      case 11:
-      case 12:
-        _showBanner('PODER ${_rankLabel(card.rank)}', 'Intercambiá una tuya con una del rival', AppColors.success);
-        Future.delayed(const Duration(milliseconds: 1700), () {
-          if (mounted) setState(() { _phase = _Phase.powerSwapSelectOwn; _swapOwnSlot = null; });
-        });
-      case 13:
-        _showBanner('PODER REY', 'Mirá 1 tuya y 1 del rival, decidí si intercambiar', AppColors.primary);
-        Future.delayed(const Duration(milliseconds: 1700), () {
-          if (mounted) setState(() { _phase = _Phase.powerKingPeek; _kingTargets = []; });
-        });
-      default:
-        _endPlayerTurn();
-    }
-  }
+  // ── Powers ─────────────────────────────────────────────────────────────────
 
-  // ── 7/8 own peek ─────────────────────────────────────────────────────────────
-  void _onPeekOwn(int i) {
-    if (_phase != _Phase.powerPeekOwn) return;
+  void _onPeekOwn(int i, String myUid) {
     _revealTimer?.cancel();
     setState(() => _revealOwnSlot = i);
-    _endPlayerTurn();
     _revealTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _revealOwnSlot = null);
+      if (!mounted) return;
+      setState(() => _revealOwnSlot = null);
+      _runAction(() => _ctrl().acknowledgePeek(myUid));
     });
   }
 
-  // ── 9/10 opponent peek ───────────────────────────────────────────────────────
-  void _onPeekOpponent(int i) {
-    if (_phase != _Phase.powerPeekOpponent) return;
+  void _onPeekOpponent(int i, String myUid) {
     _revealTimer?.cancel();
     setState(() => _revealOpponentSlot = i);
-    _endPlayerTurn();
     _revealTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _revealOpponentSlot = null);
+      if (!mounted) return;
+      setState(() => _revealOpponentSlot = null);
+      _runAction(() => _ctrl().acknowledgePeek(myUid));
     });
   }
 
-  // ── J/Q swap ─────────────────────────────────────────────────────────────────
-  void _onSwapSelectOwn(int i) {
-    if (_phase != _Phase.powerSwapSelectOwn) return;
-    setState(() { _swapOwnSlot = i; _phase = _Phase.powerSwapSelectOpponent; });
-  }
+  void _onSwapSelectOwn(int i) => setState(() => _swapOwnSlot = i);
 
-  void _onSwapSelectOpponent(int i) {
-    if (_phase != _Phase.powerSwapSelectOpponent) return;
+  Future<void> _onSwapSelectOpponent(int i, String myUid) async {
     final own = _swapOwnSlot;
     if (own == null) return;
-    final ownCard = _playerCards[own];
-    final oppCard = _opponentCards[i];
-    final newPlayer = List<GameCard>.from(_playerCards)..[own] = oppCard;
-    final newOpponent = List<GameCard>.from(_opponentCards)..[i] = ownCard;
     setState(() {
-      _playerCards = newPlayer;
-      _opponentCards = newOpponent;
       _swapOwnSlot = null;
-      _justSwappedSlots = {..._justSwappedSlots, own};
+      _justSwappedSlots.add(own);
     });
-    _endPlayerTurn();
+    await _runAction(() =>
+        _ctrl().powerSwap(myUid, ownSlot: own, opponentSlot: i));
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _justSwappedSlots = _justSwappedSlots.difference({own}));
+      if (mounted) setState(() => _justSwappedSlots.remove(own));
     });
     _showBanner('¡INTERCAMBIO!', '', AppColors.success);
   }
 
-  // ── K king ───────────────────────────────────────────────────────────────────
-  void _onKingPeek(bool isOwn, int i) {
-    if (_phase != _Phase.powerKingPeek) return;
-    final target = _KingTarget(isOwn, i);
-    if (_kingTargets.contains(target)) return;
-    // Enforce 1 from own side + 1 from opponent side
-    if (_kingTargets.isNotEmpty && _kingTargets[0].isOwn == isOwn) return;
-    final newTargets = [..._kingTargets, target];
-    setState(() => _kingTargets = newTargets);
-    if (newTargets.length == 2) {
-      setState(() => _phase = _Phase.powerKingDecide);
+  void _onKingPeek(bool isOwn, int i, String myUid, String oppUid) {
+    final ownerUid = isOwn ? myUid : oppUid;
+    _runAction(
+        () => _ctrl().kingPeek(myUid, peekOwnerUid: ownerUid, peekSlot: i));
+  }
+
+  void _kingDecide(bool doSwap, GameState g, String myUid) {
+    final pending = g.pending;
+    if (pending is! PendingKingPeek || !pending.isComplete) return;
+    if (!doSwap) {
+      _runAction(() => _ctrl().kingDecline(myUid));
+      return;
+    }
+    int? ownSlot;
+    int? oppSlot;
+    for (var k = 0; k < pending.peekedOwnerUids.length; k++) {
+      if (pending.peekedOwnerUids[k] == myUid) {
+        ownSlot = pending.peekedSlots[k];
+      } else {
+        oppSlot = pending.peekedSlots[k];
+      }
+    }
+    if (ownSlot == null || oppSlot == null) return;
+    final ownSlotFinal = ownSlot;
+    final oppSlotFinal = oppSlot;
+    _runAction(() => _ctrl()
+        .kingSwap(myUid, ownSlot: ownSlotFinal, opponentSlot: oppSlotFinal));
+    _showBanner('¡INTERCAMBIO REY!', '', AppColors.primary);
+  }
+
+  // ── Mirror ─────────────────────────────────────────────────────────────────
+
+  void _handleMirror(GameState g, String myUid) {
+    final lastRank = g.lastDiscardRank;
+    if (lastRank == null) return;
+    final mySlots = g.player(myUid).slots;
+    int? matchSlot;
+    for (var i = 0; i < mySlots.length; i++) {
+      final c = mySlots[i].card;
+      if (!c.isJoker && c.rank == lastRank) {
+        matchSlot = i;
+        break;
+      }
+    }
+    if (matchSlot != null) {
+      final slot = matchSlot;
+      _runAction(() => _ctrl().mirrorAttempt(myUid, slot));
+      _showBanner('¡ESPEJO!', '1 carta al descarte', AppColors.success);
+    } else {
+      if (mySlots.isNotEmpty) {
+        _runAction(() => _ctrl().mirrorAttempt(myUid, 0));
+        _showBanner('¡FALLASTE!', '+1 carta de penalidad', AppColors.danger);
+      }
     }
   }
 
-  void _kingDecide(bool doSwap) {
-    if (doSwap && _kingTargets.length == 2) {
-      final a = _kingTargets[0];
-      final b = _kingTargets[1];
-      GameCard cardA = a.isOwn ? _playerCards[a.slot] : _opponentCards[a.slot];
-      GameCard cardB = b.isOwn ? _playerCards[b.slot] : _opponentCards[b.slot];
-      final newPlayer = List<GameCard>.from(_playerCards);
-      final newOpponent = List<GameCard>.from(_opponentCards);
-      if (a.isOwn) newPlayer[a.slot] = cardB; else newOpponent[a.slot] = cardB;
-      if (b.isOwn) newPlayer[b.slot] = cardA; else newOpponent[b.slot] = cardA;
-      setState(() { _playerCards = newPlayer; _opponentCards = newOpponent; });
-      _showBanner('¡INTERCAMBIO REY!', '', AppColors.primary);
-    }
-    setState(() => _kingTargets = []);
-    _endPlayerTurn();
+  // ── Exit / Settings dialogs ────────────────────────────────────────────────
+
+  void _confirmExit(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xl)),
+        title: const Text('¿Salir del juego?',
+            style: TextStyle(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 18)),
+        content: const Text('Perderás el progreso de la partida actual.',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar',
+                style: TextStyle(color: AppColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.go('/');
+            },
+            child: const Text('Salir',
+                style: TextStyle(
+                    color: AppColors.danger, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
   }
 
-  // ── Demo shortcuts ────────────────────────────────────────────────────────────
-  void _demoPower(int rank) {
-    if (_phase == _Phase.peekInitial) return;
-    _activatePower(GameCard.regular(Suit.spades, rank));
+  void _openSettings(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(AppRadius.xl))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final sliderTheme = SliderThemeData(
+            activeTrackColor: AppColors.primary,
+            inactiveTrackColor: AppColors.border,
+            thumbColor: AppColors.primary,
+            overlayColor: AppColors.primary.withValues(alpha: .18),
+            trackHeight: 3,
+          );
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.xl, AppSpacing.base,
+                AppSpacing.xl, AppSpacing.xl2),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: BorderRadius.circular(AppRadius.pill))),
+              const SizedBox(height: AppSpacing.xl),
+              const Text('CONFIGURACIÓN',
+                  style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2)),
+              const SizedBox(height: AppSpacing.xl2),
+              Row(children: [
+                const Icon(Icons.music_note_rounded,
+                    color: AppColors.textSecondary, size: 20),
+                const SizedBox(width: AppSpacing.sm),
+                const Text('Música',
+                    style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w500)),
+                const Spacer(),
+                Text('${(_musicVolume * 100).round()}%',
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 12)),
+              ]),
+              SliderTheme(
+                data: sliderTheme,
+                child: Slider(
+                  value: _musicVolume,
+                  onChanged: (v) {
+                    setState(() => _musicVolume = v);
+                    setSheet(() {});
+                  },
+                ),
+              ),
+              Row(children: [
+                const Icon(Icons.volume_up_rounded,
+                    color: AppColors.textSecondary, size: 20),
+                const SizedBox(width: AppSpacing.sm),
+                const Text('Sonido FX',
+                    style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w500)),
+                const Spacer(),
+                Text('${(_fxVolume * 100).round()}%',
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 12)),
+              ]),
+              SliderTheme(
+                data: sliderTheme,
+                child: Slider(
+                  value: _fxVolume,
+                  onChanged: (v) {
+                    setState(() => _fxVolume = v);
+                    setSheet(() {});
+                  },
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Row(children: [
+                const Icon(Icons.vibration_rounded,
+                    color: AppColors.textSecondary, size: 20),
+                const SizedBox(width: AppSpacing.sm),
+                const Text('Vibración',
+                    style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w500)),
+                const Spacer(),
+                Switch(
+                  value: _hapticEnabled,
+                  onChanged: (v) {
+                    setState(() => _hapticEnabled = v);
+                    setSheet(() {});
+                  },
+                  activeThumbColor: AppColors.primary,
+                  activeTrackColor: AppColors.primary,
+                  inactiveTrackColor: AppColors.border,
+                ),
+              ]),
+            ]),
+          );
+        },
+      ),
+    );
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────────
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final hasOwnKingTarget = _kingTargets.any((t) => t.isOwn);
-    final hasOppKingTarget = _kingTargets.any((t) => !t.isOwn);
-    final opponentEye = _phase == _Phase.powerPeekOpponent;
-    final opponentKingEye = _phase == _Phase.powerKingPeek && !hasOppKingTarget;
-    final ownKingEyeEnabled = _phase == _Phase.powerKingPeek && !hasOwnKingTarget;
-    final opponentKingPeeked = _kingTargets.where((t) => !t.isOwn).map((t) => t.slot).toSet();
-    final playerKingPeeked = _kingTargets.where((t) => t.isOwn).map((t) => t.slot).toSet();
-    final swapOpponent = _phase == _Phase.powerSwapSelectOpponent;
+    ref.listen(roomStreamProvider(widget.roomCode), (prev, next) {
+      final prevGame = prev?.asData?.value?.game;
+      final nextGame = next.asData?.value?.game;
+      if (nextGame == null) return;
+      final room = next.asData?.value;
+      final myUid = ref.read(currentUserIdProvider).asData?.value;
+      if (room == null || myUid == null) return;
+      final isHost = room.hostId == myUid;
+      _onStateChange(prevGame, nextGame, myUid, isHost);
+    });
+
+    final roomAsync = ref.watch(roomStreamProvider(widget.roomCode));
+    final uidAsync = ref.watch(currentUserIdProvider);
 
     return Scaffold(
       backgroundColor: AppColors.bgDeepest,
@@ -735,102 +891,464 @@ class _ArenaScreenState extends State<ArenaScreen> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.menu_rounded, color: AppColors.textSecondary),
-          onPressed: () {},
+          icon: const Icon(Icons.logout_rounded,
+              color: AppColors.textSecondary),
+          onPressed: () => _confirmExit(context),
         ),
-        title: const Text('4 CARTAS BLITZ', style: TextStyle(
-          color: AppColors.primary, fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: 2.5)),
+        title: const Text('4 CARTAS BLITZ',
+            style: TextStyle(
+                color: AppColors.primary,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2.5)),
         centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings_rounded, color: AppColors.textSecondary),
-            onPressed: () {},
+            icon: const Icon(Icons.settings_rounded,
+                color: AppColors.textSecondary),
+            onPressed: () => _openSettings(context),
           ),
         ],
       ),
-      body: Stack(children: [
-        Container(
-          width: double.infinity, height: double.infinity,
-          decoration: const BoxDecoration(gradient: LinearGradient(
-            begin: Alignment.topCenter, end: Alignment.bottomCenter,
-            colors: [AppColors.bgBase, AppColors.bgDeepest])),
-          child: SafeArea(
-            child: Column(children: [
-              _OpponentSection(
-                opponentCards: _opponentCards,
-                revealingSlot: _revealOpponentSlot,
-                peekEye: opponentEye || opponentKingEye,
-                kingPeekedSlots: opponentKingPeeked,
-                swapSelectable: swapOpponent,
-                isThinking: _isOpponentTurn,
-                onTapCard: (i) {
-                  if (_phase == _Phase.powerPeekOpponent) _onPeekOpponent(i);
-                  else if (opponentKingEye) _onKingPeek(false, i);
-                  else if (_phase == _Phase.powerSwapSelectOpponent) _onSwapSelectOpponent(i);
-                },
+      body: roomAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(
+            child: Text('Error: $e',
+                style: AppText.body.copyWith(color: AppColors.danger))),
+        data: (room) {
+          if (room == null) {
+            return const Center(
+                child: Text('Sala no encontrada', style: AppText.title));
+          }
+          final game = room.game;
+          final myUid = uidAsync.asData?.value;
+          if (game == null || myUid == null) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return _buildBody(context, room, game, myUid);
+        },
+      ),
+    );
+  }
+
+  Widget _buildBody(
+      BuildContext context, RoomDoc room, GameState game, String myUid) {
+    final oppUid = game.opponentOf(myUid);
+    final myHandSlots = game.player(myUid).slots;
+    final oppHandSlots = game.player(oppUid).slots;
+    final myCards = myHandSlots.map((s) => s.card).toList();
+    final oppCards = oppHandSlots.map((s) => s.card).toList();
+
+    final phase = _derivePhase(game, myUid);
+    final isOpponentTurn = game.turnPlayerId != myUid;
+
+    final pending = game.pending;
+    final kingTargets = pending is PendingKingPeek
+        ? [
+            for (var k = 0; k < pending.peekedSlots.length; k++)
+              _KingTarget(pending.peekedOwnerUids[k] == myUid,
+                  pending.peekedSlots[k]),
+          ]
+        : <_KingTarget>[];
+
+    final hasOwnKingTarget = kingTargets.any((t) => t.isOwn);
+    final hasOppKingTarget = kingTargets.any((t) => !t.isOwn);
+    final opponentEye = phase == _Phase.powerPeekOpponent;
+    final opponentKingEye =
+        phase == _Phase.powerKingPeek && !hasOppKingTarget;
+    final ownKingEyeEnabled =
+        phase == _Phase.powerKingPeek && !hasOwnKingTarget;
+    final opponentKingPeeked =
+        kingTargets.where((t) => !t.isOwn).map((t) => t.slot).toSet();
+    final playerKingPeeked =
+        kingTargets.where((t) => t.isOwn).map((t) => t.slot).toSet();
+    final swapOpponent = phase == _Phase.powerSwapSelectOpponent;
+
+    final roundsRemaining = game.totalRounds - game.roundIndex;
+    final myWins = game.gamesWon[myUid] ?? 0;
+    final oppWins = game.gamesWon[oppUid] ?? 0;
+    final currentPartida = game.gameIndex + 1;
+    final partidaOver =
+        game.phase == GamePhase.gameEnd || game.phase == GamePhase.matchEnd;
+    final matchOver = game.phase == GamePhase.matchEnd;
+    final isHost = room.hostId == myUid;
+
+    return Stack(children: [
+      Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+            gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [AppColors.bgBase, AppColors.bgDeepest])),
+        child: SafeArea(
+          child: Column(children: [
+            _OpponentSection(
+              opponentCards: oppCards,
+              revealingSlot: _revealOpponentSlot,
+              peekEye: opponentEye || opponentKingEye,
+              kingPeekedSlots: opponentKingPeeked,
+              swapSelectable: swapOpponent,
+              isThinking: isOpponentTurn,
+              onTapCard: (i) {
+                if (phase == _Phase.powerPeekOpponent) {
+                  _onPeekOpponent(i, myUid);
+                } else if (opponentKingEye) {
+                  _onKingPeek(false, i, myUid, oppUid);
+                } else if (phase == _Phase.powerSwapSelectOpponent) {
+                  _onSwapSelectOpponent(i, myUid);
+                }
+              },
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            _RoundsBadge(
+              remaining: roundsRemaining,
+              currentPartida: currentPartida,
+              playerWins: myWins,
+              opponentWins: oppWins,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            _PhaseHint(
+              phase: phase,
+              peeksUsed: _initialPeekShowing.length,
+              kingCount: kingTargets.length,
+              swapOwnSelected: _swapOwnSlot != null,
+              kingPickedOwn: hasOwnKingTarget,
+              kingPickedOpp: hasOppKingTarget,
+            ),
+            const Spacer(),
+            _TurnIndicator(
+                isPlayerTurn: !isOpponentTurn && pending == null),
+            const SizedBox(height: AppSpacing.sm),
+            _TableCenter(
+              deckCount: game.deck.length,
+              discardStack: _discardEntries(game.discard),
+              drawnCard: game.drawnCard,
+              canDraw: !isOpponentTurn &&
+                  game.drawnCard == null &&
+                  pending == null &&
+                  (game.phase == GamePhase.turn ||
+                      game.phase == GamePhase.awaitingLastTurn),
+              onDrawCard: () => _drawCard(myUid),
+              onDiscardDrawn: () => _discardDrawn(myUid),
+            ),
+            const Spacer(),
+            _ActionBar(
+              phase: phase,
+              isOpponentTurn: isOpponentTurn,
+              cutPending: false,
+              onCut: () => _handleCut(myUid),
+              onMirror: () => _handleMirror(game, myUid),
+              onKingSwap: () => _kingDecide(true, game, myUid),
+              onKingKeep: () => _kingDecide(false, game, myUid),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            _PlayerHand(
+              playerCards: myCards,
+              phase: phase,
+              revealingSlot: _revealOwnSlot,
+              kingPeekedSlots: playerKingPeeked,
+              justSwappedSlots: _justSwappedSlots,
+              initialPeekShowing: _initialPeekShowing,
+              swapOwnSlot: _swapOwnSlot,
+              ownKingEyeEnabled: ownKingEyeEnabled,
+              onTapCard: (i) {
+                if (phase == _Phase.peekInitial) {
+                  _onTapInitialPeek(i, myUid);
+                } else if (phase == _Phase.cardDrawn) {
+                  _swapWithSlot(i, myUid);
+                } else if (phase == _Phase.powerPeekOwn) {
+                  _onPeekOwn(i, myUid);
+                } else if (ownKingEyeEnabled) {
+                  _onKingPeek(true, i, myUid, oppUid);
+                } else if (phase == _Phase.powerSwapSelectOwn) {
+                  _onSwapSelectOwn(i);
+                }
+              },
+            ),
+            const SizedBox(height: AppSpacing.sm),
+          ]),
+        ),
+      ),
+      Positioned.fill(
+        child: _PowerBannerOverlay(
+          visible: _bannerVisible,
+          text: _bannerText,
+          sub: _bannerSub,
+          color: _bannerColor,
+        ),
+      ),
+      if (partidaOver)
+        Positioned.fill(
+          child: _GameOverOverlay(
+            playerCards: myCards,
+            opponentCards: oppCards,
+            playerPartidaWins: myWins,
+            opponentPartidaWins: oppWins,
+            currentPartida: currentPartida,
+            matchOver: matchOver,
+            playerPenalty: 0,
+            onNextPartida: isHost
+                ? () => _runAction(() => _ctrl().nextGame())
+                : () {},
+            onNewMatch: () => context.go('/'),
+            onExit: () => context.go('/'),
+          ),
+        ),
+    ]);
+  }
+}
+
+// ─── Coin Stack Icon ─────────────────────────────────────────────────────────
+
+class _CoinStackIcon extends StatelessWidget {
+  final double size;
+  final Color color;
+  const _CoinStackIcon({this.size = 28, this.color = AppColors.primary});
+
+  Widget _coin(double w, double h, double alpha) => Container(
+    width: w, height: h,
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: alpha * .85),
+      borderRadius: BorderRadius.circular(h / 2),
+      border: Border.all(color: color, width: 1.2),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final w = size * 1.15;
+    final h = size * 0.32;
+    final gap = h * 0.72;
+    return SizedBox(
+      width: w,
+      height: h + gap * 2,
+      child: Stack(alignment: Alignment.bottomCenter, children: [
+        Positioned(bottom: 0,       child: _coin(w, h, 1.0)),
+        Positioned(bottom: gap,     child: _coin(w, h, 0.80)),
+        Positioned(bottom: gap * 2, child: _coin(w, h, 0.60)),
+      ]),
+    );
+  }
+}
+
+// ─── Game Over Overlay ────────────────────────────────────────────────────────
+
+class _GameOverOverlay extends StatelessWidget {
+  final List<GameCard> playerCards;
+  final List<GameCard> opponentCards;
+  final int playerPartidaWins;
+  final int opponentPartidaWins;
+  final int currentPartida;
+  final bool matchOver;
+  final int playerPenalty;
+  final VoidCallback onNextPartida;
+  final VoidCallback onNewMatch;
+  final VoidCallback onExit;
+
+  const _GameOverOverlay({
+    required this.playerCards, required this.opponentCards,
+    required this.playerPartidaWins, required this.opponentPartidaWins,
+    required this.currentPartida, required this.matchOver,
+    required this.playerPenalty,
+    required this.onNextPartida, required this.onNewMatch, required this.onExit,
+  });
+
+  int _score(List<GameCard> cards) => cards.fold(0, (sum, c) => sum + c.value);
+
+  Widget _cardCol(GameCard card) {
+    final valLabel = card.isJoker ? '−2' : '${card.value}';
+    final valColor = card.isJoker ? AppColors.cardInkJoker : AppColors.textPrimary;
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      _CardFace(card: card, width: 58),
+      const SizedBox(height: 5),
+      Text(valLabel, style: TextStyle(color: valColor, fontSize: 13, fontWeight: FontWeight.w700)),
+    ]);
+  }
+
+  Widget _winDot(bool filled) => Container(
+    width: 10, height: 10,
+    margin: const EdgeInsets.symmetric(horizontal: 3),
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: filled ? AppColors.primary : Colors.transparent,
+      border: Border.all(color: AppColors.primary, width: 1.5),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final playerScore = _score(playerCards) + playerPenalty;
+    final opponentScore = _score(opponentCards);
+    final playerWinsPartida = playerScore < opponentScore;
+    final tied = playerScore == opponentScore;
+
+    final String resultLabel;
+    final Color resultColor;
+    if (tied) {
+      resultLabel = 'EMPATE en esta partida';
+      resultColor = AppColors.warning;
+    } else if (playerWinsPartida) {
+      resultLabel = matchOver
+          ? (playerPartidaWins >= 2 ? '¡GANASTE EL MATCH!' : '¡Ganaste esta partida!')
+          : '¡Ganaste esta partida!';
+      resultColor = AppColors.success;
+    } else {
+      resultLabel = matchOver
+          ? (opponentPartidaWins >= 2 ? 'El rival ganó el match' : 'El rival ganó esta partida')
+          : 'El rival ganó esta partida';
+      resultColor = AppColors.danger;
+    }
+
+    final String actionLabel = matchOver ? 'NUEVA PARTIDA' : 'SEGUIR';
+    final VoidCallback actionTap = matchOver ? onNewMatch : onNextPartida;
+    final Color frameColor = tied
+        ? AppColors.warning
+        : playerWinsPartida ? AppColors.success : AppColors.danger;
+
+    return Container(
+      color: Colors.black.withValues(alpha: .90),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+          child: Container(
+            padding: const EdgeInsets.all(AppSpacing.base),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.xl),
+              border: Border.all(color: frameColor, width: 2),
+              boxShadow: [BoxShadow(color: frameColor.withValues(alpha: .35), blurRadius: 32, spreadRadius: 2)],
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              // Header: partida + dots + result
+              const SizedBox(height: AppSpacing.xs),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text('PARTIDA $currentPartida/3  ', style: AppText.caption.copyWith(letterSpacing: 1)),
+                Row(children: List.generate(2, (i) => _winDot(i < playerPartidaWins))),
+                Text('  vs  ', style: AppText.caption),
+                Row(children: List.generate(2, (i) => _winDot(i < opponentPartidaWins))),
+              ]),
+              const SizedBox(height: AppSpacing.xs),
+              Text(resultLabel, style: TextStyle(
+                  color: resultColor, fontSize: 15, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+              const SizedBox(height: AppSpacing.base),
+
+              // Player cards (compact)
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: playerCards
+                      .map((c) => Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _cardCol(c)))
+                      .toList(),
+                ),
               ),
               const SizedBox(height: AppSpacing.sm),
-              _RoundsBadge(remaining: _roundsRemaining),
-              const SizedBox(height: AppSpacing.xs),
-              _PhaseHint(
-                phase: _phase, peeksUsed: _peeksUsed,
-                kingCount: _kingTargets.length, swapOwnSelected: _swapOwnSlot != null,
-                kingPickedOwn: hasOwnKingTarget, kingPickedOpp: hasOppKingTarget,
+
+              // Score comparison — single line
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Text('TÚ  ', style: AppText.caption),
+                  Text('$playerScore', style: TextStyle(
+                      color: AppColors.primary, fontSize: 28, fontWeight: FontWeight.w800,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base),
+                    child: Text('vs', style: AppText.caption),
+                  ),
+                  Text('$opponentScore', style: TextStyle(
+                      color: AppColors.textSecondary, fontSize: 28, fontWeight: FontWeight.w800,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+                  Text('  RIVAL', style: AppText.caption),
+                ]),
               ),
-              const SizedBox(height: AppSpacing.xs),
-              _PowerDemoBar(onDemo: _demoPower, enabled: _phase == _Phase.turn && !_isOpponentTurn),
-              const Spacer(),
-              _TableCenter(
-                deckCount: _deck.length,
-                discardStack: _discardStack,
-                drawnCard: _drawnCard,
-                canDraw: _phase == _Phase.turn && _drawnCard == null && !_isOpponentTurn,
-                onDrawCard: _drawCard,
-                onDiscardDrawn: _discardDrawn,
-              ),
+
+              if (matchOver) ...[
+                const SizedBox(height: AppSpacing.sm),
+                // Coins
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [
+                      AppColors.primary.withValues(alpha: .18),
+                      AppColors.warning.withValues(alpha: .10),
+                    ]),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: AppColors.primary.withValues(alpha: .5)),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    _CoinStackIcon(size: 26, color: AppColors.primary),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text('+${playerWinsPartida || tied ? 100 : 25}', style: const TextStyle(
+                        color: AppColors.primary, fontSize: 26, fontWeight: FontWeight.w800,
+                        fontFeatures: [FontFeature.tabularFigures()])),
+                    const SizedBox(width: AppSpacing.xs),
+                    Text('monedas', style: AppText.label.copyWith(color: AppColors.primary)),
+                  ]),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                // Watch video
+                GestureDetector(
+                  onTap: () {},
+                  child: Container(
+                    width: double.infinity, height: 40,
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withValues(alpha: .12),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      border: Border.all(color: AppColors.warning, width: 1.5),
+                    ),
+                    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      const Icon(Icons.play_circle_outline_rounded, color: AppColors.warning, size: 18),
+                      const SizedBox(width: AppSpacing.xs),
+                      Text('VER VIDEO Y DUPLICAR', style: TextStyle(
+                          color: AppColors.warning, fontSize: 12, fontWeight: FontWeight.w800)),
+                    ]),
+                  ),
+                ),
+              ],
+
               const SizedBox(height: AppSpacing.sm),
-              _ActionBar(
-                phase: _phase,
-                isOpponentTurn: _isOpponentTurn,
-                onCut: _handleCut,
-                onMirror: () {},
-                onKingSwap: () => _kingDecide(true),
-                onKingKeep: () => _kingDecide(false),
-              ),
+              // Buttons
+              Row(children: [
+                Expanded(child: GestureDetector(
+                  onTap: onExit,
+                  child: Container(
+                    height: 46,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      border: Border.all(color: AppColors.border, width: 1.5),
+                    ),
+                    child: const Center(child: Text('SALIR', style: TextStyle(
+                        color: AppColors.textSecondary, fontWeight: FontWeight.w800, letterSpacing: 1))),
+                  ),
+                )),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(child: GestureDetector(
+                  onTap: actionTap,
+                  child: Container(
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .4), blurRadius: 10)],
+                    ),
+                    child: Center(child: Text(actionLabel,
+                        style: const TextStyle(color: AppColors.bgDeepest,
+                            fontWeight: FontWeight.w800, fontSize: 13))),
+                  ),
+                )),
+              ]),
               const SizedBox(height: AppSpacing.xs),
-              _TurnIndicator(isPlayerTurn: _phase == _Phase.turn && !_isOpponentTurn),
-              const SizedBox(height: AppSpacing.xs),
-              _PlayerHand(
-                playerCards: _playerCards,
-                phase: _phase,
-                revealingSlot: _revealOwnSlot,
-                kingPeekedSlots: playerKingPeeked,
-                justSwappedSlots: _justSwappedSlots,
-                initialPeekShowing: _initialPeekShowing,
-                swapOwnSlot: _swapOwnSlot,
-                ownKingEyeEnabled: ownKingEyeEnabled,
-                onTapCard: (i) {
-                  if (_phase == _Phase.peekInitial) _onTapInitialPeek(i);
-                  else if (_phase == _Phase.cardDrawn) _swapWithSlot(i);
-                  else if (_phase == _Phase.powerPeekOwn) _onPeekOwn(i);
-                  else if (ownKingEyeEnabled) _onKingPeek(true, i);
-                  else if (_phase == _Phase.powerSwapSelectOwn) _onSwapSelectOwn(i);
-                },
-              ),
-              const SizedBox(height: AppSpacing.sm),
             ]),
           ),
         ),
-        // Power banner overlay
-        Positioned.fill(
-          child: _PowerBannerOverlay(
-            visible: _bannerVisible,
-            text: _bannerText,
-            sub: _bannerSub,
-            color: _bannerColor,
-          ),
-        ),
-      ]),
+      ),
     );
   }
 }
@@ -916,6 +1434,7 @@ class _OpponentSection extends StatelessWidget {
                     eyeActive: peekEye && !isKingPeeked,
                     eyeColor: AppColors.warning,
                     selected: swapSelectable,
+                    patternColor: AppColors.cardInkRed,
                   ),
                 ),
               ),
@@ -931,26 +1450,50 @@ class _OpponentSection extends StatelessWidget {
 
 class _RoundsBadge extends StatelessWidget {
   final int remaining;
-  const _RoundsBadge({required this.remaining});
+  final int currentPartida;
+  final int playerWins;
+  final int opponentWins;
+  const _RoundsBadge({required this.remaining, required this.currentPartida, required this.playerWins, required this.opponentWins});
+
+  Widget _dot(bool filled) => Container(
+    width: 9, height: 9,
+    margin: const EdgeInsets.symmetric(horizontal: 2),
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: filled ? AppColors.primary : Colors.transparent,
+      border: Border.all(color: AppColors.primary, width: 1.5),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     const purple = AppColors.cardInkJoker;
     final isLast = remaining == 1;
-    final label = isLast ? '⚡ ÚLTIMA RONDA ⚡' : 'RONDAS RESTANTES: $remaining';
-    final color = isLast ? AppColors.danger : purple;
+    final roundLabel = isLast ? '⚡ ÚLTIMA RONDA ⚡' : 'RONDAS: $remaining';
+    final roundColor = isLast ? AppColors.danger : purple;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.xs + 2),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        border: Border.all(color: color, width: 1.5),
-        boxShadow: [BoxShadow(color: color.withValues(alpha: .28), blurRadius: 14)],
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      // Match score
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Text('PARTIDA $currentPartida/3  ', style: AppText.caption.copyWith(letterSpacing: 1)),
+        Row(children: List.generate(2, (i) => _dot(i < playerWins))),
+        Text('  vs  ', style: AppText.caption),
+        Row(children: List.generate(2, (i) => _dot(i < opponentWins))),
+      ]),
+      const SizedBox(height: 4),
+      // Ronda badge
+      AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.xs + 2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          border: Border.all(color: roundColor, width: 1.5),
+          boxShadow: [BoxShadow(color: roundColor.withValues(alpha: .28), blurRadius: 14)],
+        ),
+        child: Text(roundLabel, style: TextStyle(
+            color: roundColor, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
       ),
-      child: Text(label, style: TextStyle(
-          color: color, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
-    );
+    ]);
   }
 }
 
@@ -1003,38 +1546,6 @@ class _PhaseHint extends StatelessWidget {
     if (text.isEmpty) return const SizedBox.shrink();
     return Text(text, style: AppText.caption.copyWith(color: color, fontWeight: FontWeight.w500),
         textAlign: TextAlign.center);
-  }
-}
-
-// ─── Power Demo Bar ───────────────────────────────────────────────────────────
-
-class _PowerDemoBar extends StatelessWidget {
-  final void Function(int rank) onDemo;
-  final bool enabled;
-  const _PowerDemoBar({required this.onDemo, required this.enabled});
-
-  @override
-  Widget build(BuildContext context) {
-    const powers = [(7, '7/8', AppColors.accent), (9, '9/10', AppColors.warning),
-      (11, 'J/Q', AppColors.success), (13, 'REY', AppColors.primary)];
-    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Text('DEMO  ', style: AppText.caption.copyWith(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w700)),
-      ...powers.map((p) => Padding(
-        padding: const EdgeInsets.only(right: 4),
-        child: GestureDetector(
-          onTap: enabled ? () => onDemo(p.$1) : null,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-              border: Border.all(color: enabled ? p.$3 : AppColors.border, width: 1),
-            ),
-            child: Text(p.$2, style: TextStyle(
-                color: enabled ? p.$3 : AppColors.textMuted, fontSize: 9, fontWeight: FontWeight.w700)),
-          ),
-        ),
-      )),
-    ]);
   }
 }
 
@@ -1116,42 +1627,52 @@ class _TableCenter extends StatelessWidget {
 class _ActionBar extends StatelessWidget {
   final _Phase phase;
   final bool isOpponentTurn;
+  final bool cutPending;
   final VoidCallback onCut;
   final VoidCallback onMirror;
   final VoidCallback onKingSwap;
   final VoidCallback onKingKeep;
 
   const _ActionBar({
-    required this.phase, required this.isOpponentTurn, required this.onCut,
-    required this.onMirror, required this.onKingSwap, required this.onKingKeep,
+    required this.phase, required this.isOpponentTurn, required this.cutPending,
+    required this.onCut, required this.onMirror,
+    required this.onKingSwap, required this.onKingKeep,
   });
 
   @override
   Widget build(BuildContext context) {
+    // ESPEJO is a free action always available (except initial peek)
+    final espejoBtn = Expanded(child: _Btn(
+      label: '¡ESPEJO!', icon: Icons.copy_all_rounded,
+      color: AppColors.success, solid: true, onTap: onMirror,
+    ));
+
+    if (phase == _Phase.peekInitial) return const SizedBox(height: 52);
+
+    Widget child;
+    if (phase == _Phase.powerKingDecide) {
+      // Three buttons: cambiar | dejar | espejo
+      child = Row(children: [
+        Expanded(child: _Btn(label: 'CAMBIAR', icon: Icons.swap_horiz_rounded, color: AppColors.primary, solid: true, onTap: onKingSwap)),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(child: _Btn(label: 'DEJAR', icon: Icons.close_rounded, color: AppColors.danger, solid: false, onTap: onKingKeep)),
+        const SizedBox(width: AppSpacing.sm),
+        espejoBtn,
+      ]);
+    } else if (phase == _Phase.turn || phase == _Phase.cardDrawn) {
+      child = Row(children: [
+        Expanded(child: _Btn(label: 'CORTAR', icon: Icons.content_cut_rounded, color: AppColors.danger, solid: cutPending, onTap: isOpponentTurn ? () {} : onCut, disabled: isOpponentTurn)),
+        const SizedBox(width: AppSpacing.md),
+        espejoBtn,
+      ]);
+    } else {
+      // cardDrawn, powerPeek*, powerSwap*, powerKingPeek: espejo only
+      child = Row(children: [espejoBtn]);
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base),
-      child: switch (phase) {
-        _Phase.powerKingDecide => Row(children: [
-          Expanded(child: _Btn(label: '¡INTERCAMBIAR!', icon: Icons.swap_horiz_rounded, color: AppColors.primary, solid: true, onTap: onKingSwap)),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(child: _Btn(label: 'DEJAR ASÍ', icon: Icons.close_rounded, color: AppColors.danger, solid: false, onTap: onKingKeep)),
-        ]),
-        _Phase.cardDrawn => Center(child: Text(
-          'Tocá una carta tuya para intercambiar',
-          style: AppText.caption.copyWith(color: AppColors.primary, fontWeight: FontWeight.w500),
-          textAlign: TextAlign.center)),
-        _Phase.peekInitial ||
-        _Phase.powerPeekOwn ||
-        _Phase.powerPeekOpponent ||
-        _Phase.powerSwapSelectOwn ||
-        _Phase.powerSwapSelectOpponent ||
-        _Phase.powerKingPeek => const SizedBox(height: 52),
-        _ => Row(children: [
-          Expanded(child: _Btn(label: 'CORTAR', icon: Icons.content_cut_rounded, color: AppColors.danger, solid: false, onTap: isOpponentTurn ? () {} : onCut, disabled: isOpponentTurn)),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(child: _Btn(label: '¡ESPEJO!', icon: Icons.copy_all_rounded, color: AppColors.success, solid: true, onTap: isOpponentTurn ? () {} : onMirror, disabled: isOpponentTurn)),
-        ]),
-      },
+      child: child,
     );
   }
 }
@@ -1181,11 +1702,14 @@ class _Btn extends StatelessWidget {
             border: Border.all(color: effectiveColor, width: 1.5),
             boxShadow: disabled ? [] : [BoxShadow(color: effectiveColor.withValues(alpha: .30), blurRadius: 12)],
           ),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, color: fg, size: 18),
-            const SizedBox(width: 8),
-            Text(label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1.1)),
-          ]),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(icon, color: fg, size: 18),
+              const SizedBox(width: 6),
+              Text(label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1.1)),
+            ]),
+          ),
         ),
       ),
     );
@@ -1246,7 +1770,7 @@ class _PlayerHand extends StatelessWidget {
     const purple = AppColors.cardInkJoker;
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(4, (i) {
+      children: List.generate(playerCards.length, (i) {
         final card = playerCards[i];
         final isRevealing = revealingSlot == i;
         final isKingPeeked = kingPeekedSlots.contains(i);
@@ -1285,6 +1809,7 @@ class _PlayerHand extends StatelessWidget {
                 eyeActive: eyeActive,
                 eyeColor: AppColors.accent,
                 selected: isSwapOwn,
+                patternColor: AppColors.accent,
               ),
             ),
           ),
