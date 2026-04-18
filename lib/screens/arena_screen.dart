@@ -986,11 +986,14 @@ class _GameOverOverlay extends StatelessWidget {
               // Player cards + score
               Text('TUS CARTAS', style: AppText.label),
               const SizedBox(height: AppSpacing.sm),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: playerCards
-                    .map((c) => Padding(padding: const EdgeInsets.symmetric(horizontal: 5), child: _cardCol(c)))
-                    .toList(),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: playerCards
+                      .map((c) => Padding(padding: const EdgeInsets.symmetric(horizontal: 5), child: _cardCol(c)))
+                      .toList(),
+                ),
               ),
               const SizedBox(height: AppSpacing.base),
               Container(
@@ -1057,9 +1060,11 @@ class _GameOverOverlay extends StatelessWidget {
                       borderRadius: BorderRadius.circular(AppRadius.md),
                       boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .4), blurRadius: 14)],
                     ),
-                    child: Center(child: Text(actionLabel, style: const TextStyle(
-                        color: AppColors.bgDeepest, fontWeight: FontWeight.w800,
-                        fontSize: 12, letterSpacing: 0.8))),
+                    child: Center(child: Text(actionLabel,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: AppColors.bgDeepest, fontWeight: FontWeight.w800,
+                            fontSize: 12))),
                   ),
                 )),
               ]),
