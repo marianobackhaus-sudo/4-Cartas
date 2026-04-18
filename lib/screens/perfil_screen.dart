@@ -151,7 +151,12 @@ class PerfilScreen extends ConsumerWidget {
                     _MenuItem(
                       icon: Icons.person_outline_rounded,
                       label: 'Mi perfil',
-                      onTap: () {},
+                      onTap: () => showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) => const _EditProfileSheet(),
+                      ),
                     ),
                     _MenuItem(
                       icon: Icons.shopping_bag_outlined,
@@ -372,6 +377,295 @@ class _MisComprasSheet extends StatelessWidget {
           ..._ownedPacks.map((pack) => _OwnedPackRow(pack: pack)),
         ],
       ),
+    );
+  }
+}
+
+// ─── Edit Profile Sheet ───────────────────────────────────────────────────────
+
+class _EditProfileSheet extends StatefulWidget {
+  const _EditProfileSheet();
+
+  @override
+  State<_EditProfileSheet> createState() => _EditProfileSheetState();
+}
+
+class _EditProfileSheetState extends State<_EditProfileSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final _usernameController = TextEditingController(
+    text: FirebaseAuth.instance.currentUser?.displayName ?? '',
+  );
+  final _passwordController = TextEditingController();
+  bool _busy = false;
+  bool _obscurePassword = true;
+  String? _errorMessage;
+  String? _successMessage;
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  String? _validateUsername(String? v) {
+    if (v == null || v.trim().isEmpty) return 'Ingresá un nombre de usuario';
+    if (v.trim().length < 3) return 'Mínimo 3 caracteres';
+    return null;
+  }
+
+  String? _validatePassword(String? v) {
+    if (v == null || v.isEmpty) return null; // opcional
+    if (v.length < 6) return 'Mínimo 6 caracteres';
+    return null;
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _busy = true;
+      _errorMessage = null;
+      _successMessage = null;
+    });
+    try {
+      final user = FirebaseAuth.instance.currentUser!;
+      final newName = _usernameController.text.trim();
+      final newPass = _passwordController.text;
+      if (newName != (user.displayName ?? '')) {
+        await user.updateDisplayName(newName);
+      }
+      if (newPass.isNotEmpty) {
+        await user.updatePassword(newPass);
+        _passwordController.clear();
+      }
+      if (mounted) {
+        setState(() => _successMessage = 'Cambios guardados');
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() => _errorMessage = e.code == 'requires-recent-login'
+          ? 'Cerrá sesión y volvé a ingresar para cambiar la contraseña'
+          : e.message ?? 'Error al guardar');
+    } catch (_) {
+      setState(() => _errorMessage = 'Algo salió mal, intentá de nuevo');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.base,
+        AppSpacing.md,
+        AppSpacing.base,
+        AppSpacing.xl + bottomPadding,
+      ),
+      child: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xl),
+              Text('MI PERFIL', style: AppText.title.copyWith(letterSpacing: 1)),
+              const SizedBox(height: AppSpacing.xl2),
+              // Avatar
+              Center(
+                child: GestureDetector(
+                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Foto de perfil — próximamente', style: AppText.body),
+                      backgroundColor: AppColors.surface,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  ),
+                  child: Stack(
+                    children: [
+                      Container(
+                        width: 88, height: 88,
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.primary, width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primary.withValues(alpha: 0.2),
+                              blurRadius: 16,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.person_rounded, color: AppColors.textMuted, size: 44),
+                      ),
+                      Positioned(
+                        bottom: 0, right: 0,
+                        child: Container(
+                          width: 28, height: 28,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: AppColors.surfaceElevated, width: 2),
+                          ),
+                          child: const Icon(Icons.camera_alt_rounded, color: AppColors.onPrimary, size: 14),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xl2),
+              // Username
+              Text('NOMBRE DE USUARIO', style: AppText.label.copyWith(letterSpacing: 1.5)),
+              const SizedBox(height: AppSpacing.sm),
+              TextFormField(
+                controller: _usernameController,
+                enabled: !_busy,
+                style: AppText.bodyStrong,
+                maxLength: 20,
+                textCapitalization: TextCapitalization.characters,
+                validator: _validateUsername,
+                decoration: _fieldDecoration(
+                  hint: 'NEON_DRIFTER',
+                  icon: Icons.person_outline_rounded,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.base),
+              // Password
+              Text('NUEVA CONTRASEÑA', style: AppText.label.copyWith(letterSpacing: 1.5)),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                'Dejá vacío si no querés cambiarla',
+                style: AppText.caption.copyWith(color: AppColors.textMuted),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              TextFormField(
+                controller: _passwordController,
+                enabled: !_busy,
+                obscureText: _obscurePassword,
+                style: AppText.bodyStrong,
+                validator: _validatePassword,
+                decoration: _fieldDecoration(
+                  hint: '••••••••',
+                  icon: Icons.lock_outline_rounded,
+                  suffix: IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      color: AppColors.textMuted, size: 20,
+                    ),
+                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                ),
+              ),
+              // Feedback
+              if (_errorMessage != null) ...[
+                const SizedBox(height: AppSpacing.base),
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: AppColors.danger.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+                  ),
+                  child: Text(_errorMessage!, style: AppText.caption.copyWith(color: AppColors.danger), textAlign: TextAlign.center),
+                ),
+              ],
+              if (_successMessage != null) ...[
+                const SizedBox(height: AppSpacing.base),
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: AppColors.success.withValues(alpha: 0.4)),
+                  ),
+                  child: Text(_successMessage!, style: AppText.caption.copyWith(color: AppColors.success), textAlign: TextAlign.center),
+                ),
+              ],
+              const SizedBox(height: AppSpacing.xl),
+              _busy
+                  ? const Center(child: CircularProgressIndicator())
+                  : GestureDetector(
+                      onTap: _save,
+                      child: Container(
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primary.withValues(alpha: 0.4),
+                              blurRadius: 18, offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Text(
+                            'GUARDAR CAMBIOS',
+                            style: TextStyle(
+                              color: AppColors.onPrimary,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _fieldDecoration({
+    required String hint,
+    required IconData icon,
+    Widget? suffix,
+  }) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: AppText.body.copyWith(color: AppColors.textMuted),
+      filled: true,
+      fillColor: AppColors.surface,
+      counterText: '',
+      prefixIcon: Icon(icon, color: AppColors.textMuted, size: 20),
+      suffixIcon: suffix,
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.base, vertical: AppSpacing.md,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: const BorderSide(color: AppColors.border),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: const BorderSide(color: AppColors.primary, width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: const BorderSide(color: AppColors.danger, width: 2),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: const BorderSide(color: AppColors.danger, width: 2),
+      ),
+      errorStyle: AppText.caption.copyWith(color: AppColors.danger),
     );
   }
 }

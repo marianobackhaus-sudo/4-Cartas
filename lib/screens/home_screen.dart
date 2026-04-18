@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -338,11 +339,9 @@ class _CodeField extends StatelessWidget {
 class _WelcomeHeader extends StatelessWidget {
   const _WelcomeHeader();
 
-  // TODO: replace 'lucas' with real user from backend
-  static const _name = 'lucas';
-
   @override
   Widget build(BuildContext context) {
+    final name = FirebaseAuth.instance.currentUser?.displayName ?? '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -353,7 +352,7 @@ class _WelcomeHeader extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.xs),
         Text(
-          _name.toUpperCase(),
+          name.toUpperCase(),
           style: AppText.title.copyWith(
             color: AppColors.primary,
             letterSpacing: 3,
