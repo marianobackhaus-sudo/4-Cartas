@@ -142,6 +142,74 @@ class _CornerLabel extends StatelessWidget {
   }
 }
 
+// ─── Flip Card (3D Y-axis) ────────────────────────────────────────────────────
+
+class _FlippableCard extends StatefulWidget {
+  final bool showFace;
+  final Widget front;
+  final Widget back;
+
+  const _FlippableCard({
+    required this.showFace,
+    required this.front,
+    required this.back,
+  });
+
+  @override
+  State<_FlippableCard> createState() => _FlippableCardState();
+}
+
+class _FlippableCardState extends State<_FlippableCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    );
+    _anim = Tween<double>(begin: 0.0, end: math.pi).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+    if (widget.showFace) _ctrl.value = 1.0;
+  }
+
+  @override
+  void didUpdateWidget(_FlippableCard old) {
+    super.didUpdateWidget(old);
+    if (widget.showFace != old.showFace) {
+      widget.showFace ? _ctrl.forward() : _ctrl.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (context2, child2) {
+        final angle = _anim.value;
+        final showFront = angle > math.pi / 2;
+        return Transform(
+          transform: Matrix4.identity()
+            ..setEntry(3, 2, 0.001)
+            ..rotateY(showFront ? angle - math.pi : angle),
+          alignment: Alignment.center,
+          child: showFront ? widget.front : widget.back,
+        );
+      },
+    );
+  }
+}
+
 // ─── Card Back ────────────────────────────────────────────────────────────────
 
 /// eyeActive: muestra el ojo grande en el centro (poder activo).
@@ -151,14 +219,12 @@ class _CardBack extends StatelessWidget {
   final Color? borderColor;
   final bool eyeActive;
   final Color eyeColor;
-  final VoidCallback? onTap;
 
   const _CardBack({
     this.width = 72,
     this.borderColor,
     this.eyeActive = false,
     this.eyeColor = AppColors.accent,
-    this.onTap,
   });
 
   @override
@@ -167,9 +233,7 @@ class _CardBack extends StatelessWidget {
     final bc = borderColor ?? (eyeActive ? eyeColor : AppColors.border);
     final bw = eyeActive ? 1.5 : 1.0;
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
+    return Container(
         width: width,
         height: h,
         decoration: BoxDecoration(
@@ -195,7 +259,6 @@ class _CardBack extends StatelessWidget {
                 ),
               )
             : null,
-      ),
     );
   }
 }
@@ -420,18 +483,18 @@ class _OpponentSection extends StatelessWidget {
             return Padding(
               padding:
                   const EdgeInsets.symmetric(horizontal: AppSpacing.xs + 1),
-              child: isRevealing
-                  ? _CardFace(
-                      card: _Mock.opponentCards[i],
-                      width: 68,
-                    )
-                  : _CardBack(
-                      width: 68,
-                      eyeActive: peekActive,
-                      // dorado para el poder de espiar rival
-                      eyeColor: AppColors.warning,
-                      onTap: peekActive ? () => onTapCard(i) : null,
-                    ),
+              child: GestureDetector(
+                onTap: (peekActive && !isRevealing) ? () => onTapCard(i) : null,
+                child: _FlippableCard(
+                  showFace: isRevealing,
+                  front: _CardFace(card: _Mock.opponentCards[i], width: 68),
+                  back: _CardBack(
+                    width: 68,
+                    eyeActive: peekActive,
+                    eyeColor: AppColors.warning,
+                  ),
+                ),
+              ),
             );
           }),
         ),
@@ -743,16 +806,19 @@ class _PlayerHand extends StatelessWidget {
         return Padding(
           padding:
               const EdgeInsets.symmetric(horizontal: AppSpacing.xs + 1),
-          child: isRevealing
-              ? _CardFace(card: _Mock.playerCards[i], width: 72)
-              : _CardBack(
-                  width: 72,
-                  // borde púrpura permanente para identificar las cartas propias
-                  borderColor: peekActive ? AppColors.accent : purple,
-                  eyeActive: peekActive,
-                  eyeColor: AppColors.accent,
-                  onTap: peekActive ? () => onTapCard(i) : null,
-                ),
+          child: GestureDetector(
+            onTap: (peekActive && !isRevealing) ? () => onTapCard(i) : null,
+            child: _FlippableCard(
+              showFace: isRevealing,
+              front: _CardFace(card: _Mock.playerCards[i], width: 72),
+              back: _CardBack(
+                width: 72,
+                borderColor: peekActive ? AppColors.accent : purple,
+                eyeActive: peekActive,
+                eyeColor: AppColors.accent,
+              ),
+            ),
+          ),
         );
       }),
     );
