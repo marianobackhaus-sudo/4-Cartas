@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../core/design_tokens.dart';
 import '../core/typography.dart';
-import '../dev/local_mode.dart';
 import '../state/auth_providers.dart';
 import '../state/providers.dart';
 
@@ -72,24 +71,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           .createRoom(hostUid: uid, hostNickname: nick);
       ref.read(nicknameProvider.notifier).state = nick;
       if (mounted) context.go('/lobby/${room.roomCode}');
-    });
-  }
-
-  Future<void> _onHotseat() async {
-    await _withBusy(() async {
-      final repo = ref.read(roomRepositoryProvider);
-      final room = await repo.createRoom(
-        hostUid: kLocalPlayerAUid,
-        hostNickname: kLocalPlayerANick,
-      );
-      await repo.joinRoom(
-        code: room.roomCode,
-        uid: kLocalPlayerBUid,
-        nickname: kLocalPlayerBNick,
-      );
-      await repo.startFirstGame(room.roomCode);
-      ref.read(currentLocalUidProvider.notifier).state = kLocalPlayerAUid;
-      if (mounted) context.go('/game/${room.roomCode}');
     });
   }
 
@@ -195,17 +176,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     solid: false,
                     onTap: _busy ? null : _onUnirse,
                   ),
-                  if (kLocalMode) ...[
-                    const SizedBox(height: AppSpacing.base),
-                    _HomeButton(
-                      label: 'HOTSEAT (test rápido)',
-                      icon: Icons.flash_on_rounded,
-                      color: AppColors.warning,
-                      textColor: AppColors.warning,
-                      solid: false,
-                      onTap: _busy ? null : _onHotseat,
-                    ),
-                  ],
                   if (_busy) ...[
                     const SizedBox(height: AppSpacing.base),
                     const Center(child: CircularProgressIndicator()),

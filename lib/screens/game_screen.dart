@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import '../core/design_tokens.dart';
 import '../core/typography.dart';
 import '../data/room_doc.dart';
-import '../dev/local_mode.dart';
 import '../engine/models/game_phase.dart';
 import '../engine/models/game_state.dart';
 import '../engine/models/pending_action.dart';
@@ -184,7 +183,6 @@ class _GameBody extends ConsumerWidget {
       children: [
         Column(
           children: [
-            if (kLocalMode) _DevSwitchPlayer(myUid: myUid, room: room),
             TurnBanner(
               isMyTurn: isMyTurn,
               label: _turnLabel(game, room, myUid),
@@ -562,50 +560,6 @@ class _GameBody extends ConsumerWidget {
     final msg = e.toString();
     if (msg.startsWith('GameError')) return msg;
     return 'Error: $msg';
-  }
-}
-
-class _DevSwitchPlayer extends ConsumerWidget {
-  const _DevSwitchPlayer({required this.myUid, required this.room});
-
-  final String myUid;
-  final RoomDoc room;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final myNick = room.players[myUid]?.nickname ?? myUid;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.base, vertical: AppSpacing.xs),
-      color: AppColors.primary.withValues(alpha: 0.12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text('DEV · sos $myNick',
-              style: AppText.caption.copyWith(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1)),
-          TextButton.icon(
-            onPressed: () {
-              final current = ref.read(currentLocalUidProvider);
-              ref.read(currentLocalUidProvider.notifier).state =
-                  current == kLocalPlayerAUid
-                      ? kLocalPlayerBUid
-                      : kLocalPlayerAUid;
-            },
-            icon: const Icon(Icons.switch_account_rounded, size: 16),
-            label: const Text('Cambiar jugador'),
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm, vertical: 0),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 

@@ -3,26 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
-import 'dev/local_mode.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (!kLocalMode) {
-    // Uses native platform config (google-services.json / GoogleService-Info.plist).
-    // After running `flutterfire configure`, replace with:
-    //   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-    try {
-      await Firebase.initializeApp();
-    } catch (e) {
-      debugPrint('Firebase init failed: $e');
-    }
-  }
+  // Usa native platform config (google-services.json / GoogleService-Info.plist).
+  // Después de `flutterfire configure` reemplazar por:
+  //   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await Firebase.initializeApp();
 
-  runApp(
-    ProviderScope(
-      overrides: kLocalMode ? buildLocalOverrides() : const [],
-      child: const App(),
-    ),
-  );
+  runApp(const ProviderScope(child: App()));
 }
