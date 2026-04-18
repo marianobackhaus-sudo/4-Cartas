@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/theme.dart';
-import 'screens/arena_screen.dart';
+import 'screens/home_screen.dart';
 
 class App extends StatelessWidget {
   const App({super.key});
@@ -12,7 +12,7 @@ class App extends StatelessWidget {
       title: '4 Cartas BLITZ',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.build(),
-      home: const ArenaScreen(),
+      home: const HomeScreen(),
     );
   }
 }
