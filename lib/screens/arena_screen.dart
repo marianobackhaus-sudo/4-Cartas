@@ -434,6 +434,9 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
   GamePhase? _prevPhase;
   String? _prevCutterId;
 
+  // Mirror selection mode
+  bool _mirrorMode = false;
+
   // Settings
   double _musicVolume = 0.8;
   double _fxVolume = 1.0;
@@ -698,27 +701,30 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
 
   // ── Mirror ─────────────────────────────────────────────────────────────────
 
-  void _handleMirror(GameState g, String myUid) {
+  /// Enters / exits mirror selection mode. No dispatch here — the user has to
+  /// pick a specific card. Visible to both players at any time.
+  void _toggleMirrorMode(GameState g) {
+    if (g.lastDiscardRank == null) return;
+    setState(() => _mirrorMode = !_mirrorMode);
+    if (_mirrorMode) {
+      _showBanner('ESPEJO', 'Tocá una de tus cartas', AppColors.success,
+          dur: const Duration(milliseconds: 1200));
+    }
+  }
+
+  /// Called when the user taps one of their own cards while in mirror mode.
+  Future<void> _onMirrorSelect(int slotIndex, GameState g, String myUid) async {
+    setState(() => _mirrorMode = false);
     final lastRank = g.lastDiscardRank;
     if (lastRank == null) return;
-    final mySlots = g.player(myUid).slots;
-    int? matchSlot;
-    for (var i = 0; i < mySlots.length; i++) {
-      final c = mySlots[i].card;
-      if (!c.isJoker && c.rank == lastRank) {
-        matchSlot = i;
-        break;
-      }
-    }
-    if (matchSlot != null) {
-      final slot = matchSlot;
-      _runAction(() => _ctrl().mirrorAttempt(myUid, slot));
-      _showBanner('¡ESPEJO!', '1 carta al descarte', AppColors.success);
+    final card = g.player(myUid).slots[slotIndex].card;
+    final isMatch = !card.isJoker && card.rank == lastRank;
+    await _runAction(() => _ctrl().mirrorAttempt(myUid, slotIndex));
+    if (isMatch) {
+      _showBanner('¡ESPEJO!', 'Carta al descarte', AppColors.success);
     } else {
-      if (mySlots.isNotEmpty) {
-        _runAction(() => _ctrl().mirrorAttempt(myUid, 0));
-        _showBanner('¡FALLASTE!', '+1 carta de penalidad', AppColors.danger);
-      }
+      _showBanner('¡FALLASTE!', 'Se revela + carta extra',
+          AppColors.danger);
     }
   }
 
@@ -1039,7 +1045,7 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
               isOpponentTurn: isOpponentTurn,
               cutPending: false,
               onCut: () => _handleCut(myUid),
-              onMirror: () => _handleMirror(game, myUid),
+              onMirror: () => _toggleMirrorMode(game),
               onKingSwap: () => _kingDecide(true, game, myUid),
               onKingKeep: () => _kingDecide(false, game, myUid),
             ),
@@ -1053,8 +1059,11 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
               initialPeekShowing: _initialPeekShowing,
               swapOwnSlot: _swapOwnSlot,
               ownKingEyeEnabled: ownKingEyeEnabled,
+              mirrorMode: _mirrorMode,
               onTapCard: (i) {
-                if (phase == _Phase.peekInitial) {
+                if (_mirrorMode) {
+                  _onMirrorSelect(i, game, myUid);
+                } else if (phase == _Phase.peekInitial) {
                   _onTapInitialPeek(i, myUid);
                 } else if (phase == _Phase.cardDrawn) {
                   _swapWithSlot(i, myUid);
@@ -1756,6 +1765,7 @@ class _PlayerHand extends StatelessWidget {
   final Set<int> initialPeekShowing;
   final int? swapOwnSlot;
   final bool ownKingEyeEnabled;
+  final bool mirrorMode;
   final void Function(int) onTapCard;
 
   const _PlayerHand({
@@ -1763,6 +1773,7 @@ class _PlayerHand extends StatelessWidget {
     required this.kingPeekedSlots, required this.justSwappedSlots,
     required this.initialPeekShowing, required this.swapOwnSlot,
     required this.ownKingEyeEnabled, required this.onTapCard,
+    this.mirrorMode = false,
   });
 
   @override
@@ -1780,20 +1791,28 @@ class _PlayerHand extends StatelessWidget {
 
         final isSwapOwn = swapOwnSlot == i;
         final eyeActive = phase == _Phase.powerPeekOwn || (ownKingEyeEnabled && !isKingPeeked);
-        final tappable = switch (phase) {
-          _Phase.peekInitial => !isInitialPeek,
-          _Phase.cardDrawn => true,
-          _Phase.powerPeekOwn => !isRevealing,
-          _Phase.powerKingPeek => ownKingEyeEnabled && !isKingPeeked,
-          _Phase.powerSwapSelectOwn => true,
-          _ => false,
-        };
+        final tappable = mirrorMode ||
+            switch (phase) {
+              _Phase.peekInitial => !isInitialPeek,
+              _Phase.cardDrawn => true,
+              _Phase.powerPeekOwn => !isRevealing,
+              _Phase.powerKingPeek => ownKingEyeEnabled && !isKingPeeked,
+              _Phase.powerSwapSelectOwn => true,
+              _ => false,
+            };
 
         Color borderColor;
-        if (isSwapOwn) borderColor = AppColors.primary;
-        else if (phase == _Phase.cardDrawn) borderColor = AppColors.accent;
-        else if (phase == _Phase.peekInitial) borderColor = AppColors.accent;
-        else borderColor = purple;
+        if (mirrorMode) {
+          borderColor = AppColors.success;
+        } else if (isSwapOwn) {
+          borderColor = AppColors.primary;
+        } else if (phase == _Phase.cardDrawn) {
+          borderColor = AppColors.accent;
+        } else if (phase == _Phase.peekInitial) {
+          borderColor = AppColors.accent;
+        } else {
+          borderColor = purple;
+        }
 
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs + 1),
@@ -1809,7 +1828,7 @@ class _PlayerHand extends StatelessWidget {
                 eyeActive: eyeActive,
                 eyeColor: AppColors.accent,
                 selected: isSwapOwn,
-                patternColor: AppColors.accent,
+                patternColor: mirrorMode ? AppColors.success : AppColors.accent,
               ),
             ),
           ),
