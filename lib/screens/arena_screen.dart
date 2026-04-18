@@ -162,9 +162,12 @@ class _CardBack extends StatelessWidget {
   final Color eyeColor;
   final bool selected; // J/Q swap selected
 
+  final Color patternColor;
+
   const _CardBack({
     this.width = 72, this.borderColor, this.eyeActive = false,
     this.eyeColor = AppColors.accent, this.selected = false,
+    this.patternColor = AppColors.cardBackPattern,
   });
 
   @override
@@ -199,14 +202,14 @@ class _CardBack extends StatelessWidget {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(AppRadius.xs),
                       border: Border.all(
-                        color: AppColors.cardBackPattern.withValues(alpha: 0.40),
+                        color: patternColor.withValues(alpha: 0.40),
                         width: 1.0,
                       ),
                     ),
                     child: Center(
                       child: Text('♦',
                         style: TextStyle(
-                          color: AppColors.cardBackPattern.withValues(alpha: 0.45),
+                          color: patternColor.withValues(alpha: 0.45),
                           fontSize: width * 0.22,
                           height: 1,
                         ),
@@ -1412,6 +1415,7 @@ class _OpponentSection extends StatelessWidget {
                     eyeActive: peekEye && !isKingPeeked,
                     eyeColor: AppColors.warning,
                     selected: swapSelectable,
+                    patternColor: AppColors.cardInkRed,
                   ),
                 ),
               ),
@@ -1786,6 +1790,7 @@ class _PlayerHand extends StatelessWidget {
                 eyeActive: eyeActive,
                 eyeColor: AppColors.accent,
                 selected: isSwapOwn,
+                patternColor: AppColors.accent,
               ),
             ),
           ),
