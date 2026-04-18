@@ -248,6 +248,7 @@ GameState setupInitialState({
     gamesWon: gamesWon ?? zeros,
     lastDiscardRank: starter.isJoker ? null : starter.rank,
     lastDiscardBy: null,
+    mirrorPenalty: zeros,
   );
 }
 
@@ -284,8 +285,8 @@ GameState advanceFromReveal(GameState state) {
   final a = state.seatOrder[0];
   final b = state.seatOrder[1];
   final newPoints = Map<String, int>.of(state.roundPoints);
-  newPoints[a] = (newPoints[a] ?? 0) + scoreHand(state.player(a));
-  newPoints[b] = (newPoints[b] ?? 0) + scoreHand(state.player(b));
+  newPoints[a] = (newPoints[a] ?? 0) + scoreHandWithPenalty(state, a);
+  newPoints[b] = (newPoints[b] ?? 0) + scoreHandWithPenalty(state, b);
 
   final nextRoundIdx = state.roundIndex + 1;
   final gameComplete = nextRoundIdx >= state.totalRounds;
@@ -381,6 +382,7 @@ GameState startNextRound({
     roundWinnerUid: null,
     lastDiscardRank: null,
     lastDiscardBy: null,
+    mirrorPenalty: {for (final uid in state.seatOrder) uid: 0},
   );
 }
 
@@ -441,6 +443,7 @@ GameState startNextGame({
     gameIndex: state.gameIndex + 1,
     lastDiscardRank: starter.isJoker ? null : starter.rank,
     lastDiscardBy: null,
+    mirrorPenalty: zeros,
   );
 }
 

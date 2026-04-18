@@ -723,8 +723,7 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
     if (isMatch) {
       _showBanner('¡ESPEJO!', 'Carta al descarte', AppColors.success);
     } else {
-      _showBanner('¡FALLASTE!', 'Se revela + carta extra',
-          AppColors.danger);
+      _showBanner('¡FALLASTE!', '+5 puntos de penalidad', AppColors.danger);
     }
   }
 
@@ -1097,7 +1096,7 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
             opponentPartidaWins: oppWins,
             currentPartida: currentPartida,
             matchOver: matchOver,
-            playerPenalty: 0,
+            playerPenalty: game.mirrorPenalty[myUid] ?? 0,
             onNextPartida: isHost
                 ? () => _runAction(() => _ctrl().nextGame())
                 : () {},

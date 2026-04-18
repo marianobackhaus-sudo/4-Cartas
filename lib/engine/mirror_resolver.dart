@@ -8,7 +8,7 @@ import 'models/player_state.dart';
 
 /// Resolves a MirrorAttempt.
 ///
-/// Rules (from plan):
+/// Rules:
 /// - Any player can attempt a mirror at any time during active play,
 ///   regardless of whose turn it is. Does NOT change `turnPlayerId`.
 /// - Requires `state.lastDiscardRank != null` (there's a top discard to match).
@@ -16,9 +16,9 @@ import 'models/player_state.dart';
 ///     → slot is removed (hand shrinks). Slot's card goes to the top of discard
 ///       (becoming the new lastDiscard).
 /// - If it does NOT match (penalty):
-///     → slot stays but flips face-up + is marked knownToOwner.
-///     → an extra card from the deck is appended at the end of the hand.
-///       (Hand grows, scoring penalty.)
+///     → hand stays untouched (cards stay hidden).
+///     → `mirrorPenalty[uid]` is increased by 5 points. Added to the
+///       player's score at round reveal.
 /// - Jokers cannot be mirrored (rank sentinel 0, never matches discard).
 /// - Allowed phases: turn, awaitingLastTurn. Not allowed during peekInitial,
 ///   reveal, roundEnd, gameEnd, matchEnd, or while a `pending` power is active
@@ -64,7 +64,7 @@ GameState resolveMirror(GameState state, MirrorAttempt action) {
   if (!slotCard.isJoker && slotCard.rank == lastRank) {
     return _applyMirrorMatch(state, action.uid, action.slotIndex, slotCard);
   }
-  return _applyMirrorMiss(state, action.uid, action.slotIndex);
+  return _applyMirrorMiss(state, action.uid);
 }
 
 // ── Match: slot removed, card → discard top ──────────────────────────────────
@@ -90,37 +90,10 @@ GameState _applyMirrorMatch(
   );
 }
 
-// ── Miss: slot flipped + extra card dealt as penalty ─────────────────────────
+// ── Miss: +5 points penalty (hand untouched) ─────────────────────────────────
 
-GameState _applyMirrorMiss(
-  GameState state,
-  String uid,
-  int slotIndex,
-) {
-  if (state.deck.isEmpty) {
-    throw const GameError(
-      GameErrorCode.deckEmpty,
-      'Deck empty — cannot deal mirror penalty card',
-    );
-  }
-
-  final player = state.player(uid);
-  final newSlots = List<HandSlot>.of(player.slots);
-  // Flip the mis-mirrored slot face-up, known to owner.
-  newSlots[slotIndex] = newSlots[slotIndex].copyWith(
-    faceDown: false,
-    knownToOwner: true,
-  );
-  // Penalty: append a fresh card from deck top, face-down, unknown.
-  final newDeck = List<GameCard>.of(state.deck);
-  final penalty = newDeck.removeLast();
-  newSlots.add(HandSlot(card: penalty, faceDown: true));
-
-  final newPlayers = Map<String, PlayerState>.of(state.players)
-    ..[uid] = player.copyWith(slots: newSlots);
-
-  return state.copyWith(
-    players: newPlayers,
-    deck: newDeck,
-  );
+GameState _applyMirrorMiss(GameState state, String uid) {
+  final penalty = Map<String, int>.of(state.mirrorPenalty);
+  penalty[uid] = (penalty[uid] ?? 0) + 5;
+  return state.copyWith(mirrorPenalty: penalty);
 }

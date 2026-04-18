@@ -37,11 +37,8 @@ void main() {
   });
 
   group('MirrorAttempt — miss', () {
-    test('slot flips face-up and penalty card appended', () {
+    test('hand stays untouched, +5 to mirrorPenalty', () {
       final state = makeState(
-        deck: const [
-          GameCard.regular(Suit.diamonds, 12), // becomes penalty (top)
-        ],
         hands: {
           'A': [
             const GameCard.regular(Suit.hearts, 10),
@@ -59,38 +56,25 @@ void main() {
         lastDiscardRank: 7,
       );
       final next = resolveMirror(state, const MirrorAttempt('A', 0));
-      expect(next.player('A').slots.length, 5);
-      expect(next.player('A').slots[0].faceDown, false);
-      expect(next.player('A').slots[0].knownToOwner, true);
-      expect(next.player('A').slots.last.card,
-          const GameCard.regular(Suit.diamonds, 12));
-      expect(next.deck.isEmpty, true);
+      expect(next.player('A').slots.length, 4, reason: 'hand stays at 4');
+      expect(next.player('A').slots[0].faceDown, true,
+          reason: 'slot stays hidden');
+      expect(next.mirrorPenalty['A'], 5);
+      expect(next.mirrorPenalty['B'] ?? 0, 0);
     });
 
-    test('deck-empty on miss throws', () {
+    test('consecutive misses accumulate', () {
       final state = makeState(
-        deck: const [],
         hands: {
-          'A': [
-            const GameCard.regular(Suit.hearts, 10),
-            const GameCard.regular(Suit.clubs, 3),
-            const GameCard.regular(Suit.diamonds, 4),
-            const GameCard.regular(Suit.spades, 5),
-          ],
-          'B': [
-            const GameCard.regular(Suit.hearts, 2),
-            const GameCard.regular(Suit.clubs, 3),
-            const GameCard.regular(Suit.diamonds, 4),
-            const GameCard.regular(Suit.spades, 5),
-          ],
+          'A': List.filled(4, const GameCard.regular(Suit.hearts, 3)),
+          'B': List.filled(4, const GameCard.regular(Suit.spades, 3)),
         },
         lastDiscardRank: 7,
+        turnPlayerId: 'B',
       );
-      expect(
-        () => resolveMirror(state, const MirrorAttempt('A', 0)),
-        throwsA(isA<GameError>().having(
-            (e) => e.code, 'code', GameErrorCode.deckEmpty)),
-      );
+      var next = resolveMirror(state, const MirrorAttempt('A', 0));
+      next = resolveMirror(next, const MirrorAttempt('A', 1));
+      expect(next.mirrorPenalty['A'], 10);
     });
   });
 

@@ -32,6 +32,10 @@ class GameState {
   final int? lastDiscardRank;
   final String? lastDiscardBy;
 
+  /// Penalty points accumulated for failed mirror attempts in the current
+  /// round. Added to the player's score at reveal.
+  final Map<String, int> mirrorPenalty;
+
   const GameState({
     required this.deck,
     required this.discard,
@@ -54,6 +58,7 @@ class GameState {
     this.matchWinnerUid,
     this.lastDiscardRank,
     this.lastDiscardBy,
+    this.mirrorPenalty = const {},
   });
 
   String opponentOf(String uid) => seatOrder.firstWhere((u) => u != uid);
@@ -82,6 +87,7 @@ class GameState {
     Object? matchWinnerUid = _sentinel,
     Object? lastDiscardRank = _sentinel,
     Object? lastDiscardBy = _sentinel,
+    Map<String, int>? mirrorPenalty,
   }) {
     return GameState(
       deck: deck ?? this.deck,
@@ -115,6 +121,7 @@ class GameState {
       lastDiscardBy: identical(lastDiscardBy, _sentinel)
           ? this.lastDiscardBy
           : lastDiscardBy as String?,
+      mirrorPenalty: mirrorPenalty ?? this.mirrorPenalty,
     );
   }
 
@@ -140,6 +147,7 @@ class GameState {
         'matchWinnerUid': matchWinnerUid,
         'lastDiscardRank': lastDiscardRank,
         'lastDiscardBy': lastDiscardBy,
+        'mirrorPenalty': mirrorPenalty,
       };
 
   factory GameState.fromJson(Map<String, dynamic> json) => GameState(
@@ -181,6 +189,11 @@ class GameState {
         matchWinnerUid: json['matchWinnerUid'] as String?,
         lastDiscardRank: json['lastDiscardRank'] as int?,
         lastDiscardBy: json['lastDiscardBy'] as String?,
+        mirrorPenalty:
+            (json['mirrorPenalty'] as Map<String, dynamic>?)?.map(
+                  (k, v) => MapEntry(k, (v as num).toInt()),
+                ) ??
+                const {},
       );
 }
 
