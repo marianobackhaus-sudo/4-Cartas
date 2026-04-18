@@ -1101,166 +1101,141 @@ class _GameOverOverlay extends StatelessWidget {
     return Container(
       color: Colors.black.withValues(alpha: .90),
       child: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
           child: Container(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.xl, AppSpacing.xl2, AppSpacing.xl, AppSpacing.xl),
+            padding: const EdgeInsets.all(AppSpacing.base),
             decoration: BoxDecoration(
               color: AppColors.surface,
               borderRadius: BorderRadius.circular(AppRadius.xl),
               border: Border.all(color: frameColor, width: 2),
-              boxShadow: [BoxShadow(color: frameColor.withValues(alpha: .35), blurRadius: 48, spreadRadius: 4)],
+              boxShadow: [BoxShadow(color: frameColor.withValues(alpha: .35), blurRadius: 32, spreadRadius: 2)],
             ),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              // Match score dots
-              Text('PARTIDA $currentPartida DE 3', style: AppText.label.copyWith(letterSpacing: 1.5)),
-              const SizedBox(height: AppSpacing.sm),
+              // Header: partida + dots + result
+              const SizedBox(height: AppSpacing.xs),
               Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Text('TÚ  ', style: AppText.caption),
+                Text('PARTIDA $currentPartida/3  ', style: AppText.caption.copyWith(letterSpacing: 1)),
                 Row(children: List.generate(2, (i) => _winDot(i < playerPartidaWins))),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-                  child: Text('vs', style: AppText.caption),
-                ),
+                Text('  vs  ', style: AppText.caption),
                 Row(children: List.generate(2, (i) => _winDot(i < opponentPartidaWins))),
-                Text('  RIVAL', style: AppText.caption),
               ]),
-              const SizedBox(height: AppSpacing.base),
+              const SizedBox(height: AppSpacing.xs),
               Text(resultLabel, style: TextStyle(
-                  color: resultColor, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 1)),
+                  color: resultColor, fontSize: 15, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+              const SizedBox(height: AppSpacing.base),
 
-              const SizedBox(height: AppSpacing.xl2),
-
-              // Player cards + score
-              Text('TUS CARTAS', style: AppText.label),
-              const SizedBox(height: AppSpacing.sm),
+              // Player cards (compact)
               FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: playerCards
-                      .map((c) => Padding(padding: const EdgeInsets.symmetric(horizontal: 5), child: _cardCol(c)))
+                      .map((c) => Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: _cardCol(c)))
                       .toList(),
                 ),
               ),
-              const SizedBox(height: AppSpacing.base),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl2, vertical: AppSpacing.md),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: .1),
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(color: AppColors.primary),
-                ),
-                child: Column(children: [
-                  Text('PUNTAJE', style: AppText.label),
-                  Text('$playerScore', style: TextStyle(
-                      color: AppColors.primary, fontSize: 44,
-                      fontWeight: FontWeight.w800, fontFeatures: const [FontFeature.tabularFigures()])),
-                  Text('cuanto más bajo, mejor', style: AppText.caption),
-                ]),
-              ),
-              const SizedBox(height: AppSpacing.base),
+              const SizedBox(height: AppSpacing.sm),
 
-              // Opponent summary
+              // Score comparison — single line
               Container(
-                padding: const EdgeInsets.all(AppSpacing.base),
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.sm),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceElevated,
                   borderRadius: BorderRadius.circular(AppRadius.md),
-                  border: Border.all(color: AppColors.border),
                 ),
-                child: Column(children: [
-                  Text('RIVAL  •  PUNTAJE: $opponentScore', style: AppText.label),
-                  const SizedBox(height: AppSpacing.sm),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: opponentCards
-                        .map((c) => Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                              child: _CardFace(card: c, width: 48)))
-                        .toList(),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Text('TÚ  ', style: AppText.caption),
+                  Text('$playerScore', style: TextStyle(
+                      color: AppColors.primary, fontSize: 28, fontWeight: FontWeight.w800,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base),
+                    child: Text('vs', style: AppText.caption),
                   ),
+                  Text('$opponentScore', style: TextStyle(
+                      color: AppColors.textSecondary, fontSize: 28, fontWeight: FontWeight.w800,
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+                  Text('  RIVAL', style: AppText.caption),
                 ]),
               ),
-              const SizedBox(height: AppSpacing.xl),
 
               if (matchOver) ...[
-                // Coin reward — only shown when match is fully decided
+                const SizedBox(height: AppSpacing.sm),
+                // Coins
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.md),
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.sm),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [AppColors.primary.withValues(alpha: .18), AppColors.warning.withValues(alpha: .10)],
-                    ),
-                    borderRadius: BorderRadius.circular(AppRadius.lg),
+                    gradient: LinearGradient(colors: [
+                      AppColors.primary.withValues(alpha: .18),
+                      AppColors.warning.withValues(alpha: .10),
+                    ]),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
                     border: Border.all(color: AppColors.primary.withValues(alpha: .5)),
                   ),
                   child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    _CoinStackIcon(size: 30, color: AppColors.primary),
+                    _CoinStackIcon(size: 26, color: AppColors.primary),
                     const SizedBox(width: AppSpacing.sm),
                     Text('+${playerWinsPartida || tied ? 100 : 25}', style: const TextStyle(
-                        color: AppColors.primary, fontSize: 32, fontWeight: FontWeight.w800,
+                        color: AppColors.primary, fontSize: 26, fontWeight: FontWeight.w800,
                         fontFeatures: [FontFeature.tabularFigures()])),
                     const SizedBox(width: AppSpacing.xs),
                     Text('monedas', style: AppText.label.copyWith(color: AppColors.primary)),
                   ]),
                 ),
-                const SizedBox(height: AppSpacing.sm),
-
-                // Watch video to double
+                const SizedBox(height: AppSpacing.xs),
+                // Watch video
                 GestureDetector(
                   onTap: () {},
                   child: Container(
-                    width: double.infinity,
-                    height: 48,
+                    width: double.infinity, height: 40,
                     decoration: BoxDecoration(
                       color: AppColors.warning.withValues(alpha: .12),
                       borderRadius: BorderRadius.circular(AppRadius.md),
                       border: Border.all(color: AppColors.warning, width: 1.5),
                     ),
                     child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      const Icon(Icons.play_circle_outline_rounded, color: AppColors.warning, size: 20),
-                      const SizedBox(width: AppSpacing.sm),
+                      const Icon(Icons.play_circle_outline_rounded, color: AppColors.warning, size: 18),
+                      const SizedBox(width: AppSpacing.xs),
                       Text('VER VIDEO Y DUPLICAR', style: TextStyle(
-                          color: AppColors.warning, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                          color: AppColors.warning, fontSize: 12, fontWeight: FontWeight.w800)),
                     ]),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.xl),
               ],
 
-              // Main action buttons
+              const SizedBox(height: AppSpacing.sm),
+              // Buttons
               Row(children: [
                 Expanded(child: GestureDetector(
                   onTap: onExit,
                   child: Container(
-                    height: 52,
+                    height: 46,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(AppRadius.md),
                       border: Border.all(color: AppColors.border, width: 1.5),
                     ),
                     child: const Center(child: Text('SALIR', style: TextStyle(
-                        color: AppColors.textSecondary, fontWeight: FontWeight.w800, letterSpacing: 1.2))),
+                        color: AppColors.textSecondary, fontWeight: FontWeight.w800, letterSpacing: 1))),
                   ),
                 )),
-                const SizedBox(width: AppSpacing.md),
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(child: GestureDetector(
                   onTap: actionTap,
                   child: Container(
-                    height: 52,
+                    height: 46,
                     decoration: BoxDecoration(
                       color: AppColors.primary,
                       borderRadius: BorderRadius.circular(AppRadius.md),
-                      boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .4), blurRadius: 14)],
+                      boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .4), blurRadius: 10)],
                     ),
                     child: Center(child: Text(actionLabel,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                            color: AppColors.bgDeepest, fontWeight: FontWeight.w800,
-                            fontSize: 13))),
+                        style: const TextStyle(color: AppColors.bgDeepest,
+                            fontWeight: FontWeight.w800, fontSize: 13))),
                   ),
                 )),
               ]),
+              const SizedBox(height: AppSpacing.xs),
             ]),
           ),
         ),
