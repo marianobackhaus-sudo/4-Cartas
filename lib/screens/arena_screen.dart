@@ -1034,9 +1034,52 @@ class _GameOverOverlay extends StatelessWidget {
                   ),
                 ]),
               ),
-              const SizedBox(height: AppSpacing.xl2),
+              const SizedBox(height: AppSpacing.xl),
 
-              // Buttons
+              // Coin reward
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.md),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppColors.primary.withValues(alpha: .18), AppColors.warning.withValues(alpha: .10)],
+                  ),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: .5)),
+                ),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  const Icon(Icons.monetization_on_rounded, color: AppColors.primary, size: 28),
+                  const SizedBox(width: AppSpacing.sm),
+                  Text('+${playerWinsPartida || tied ? 100 : 25}', style: const TextStyle(
+                      color: AppColors.primary, fontSize: 32, fontWeight: FontWeight.w800,
+                      fontFeatures: [FontFeature.tabularFigures()])),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text('monedas', style: AppText.label.copyWith(color: AppColors.primary)),
+                ]),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+
+              // Watch video to double
+              GestureDetector(
+                onTap: () {},
+                child: Container(
+                  width: double.infinity,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: AppColors.warning, width: 1.5),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    const Icon(Icons.play_circle_outline_rounded, color: AppColors.warning, size: 20),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text('VER VIDEO Y DUPLICAR', style: TextStyle(
+                        color: AppColors.warning, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xl),
+
+              // Main action buttons
               Row(children: [
                 Expanded(child: GestureDetector(
                   onTap: onExit,
@@ -1064,7 +1107,7 @@ class _GameOverOverlay extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                             color: AppColors.bgDeepest, fontWeight: FontWeight.w800,
-                            fontSize: 12))),
+                            fontSize: 13))),
                   ),
                 )),
               ]),
