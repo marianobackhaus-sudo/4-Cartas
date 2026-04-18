@@ -991,97 +991,92 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
                 end: Alignment.bottomCenter,
                 colors: [AppColors.bgBase, AppColors.bgDeepest])),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.xs, vertical: AppSpacing.sm),
-            child: Column(children: [
-              const SizedBox(height: AppSpacing.base),
-              _OpponentSection(
-                opponentCards: oppCards,
-                revealingSlot: _revealOpponentSlot,
-                peekEye: opponentEye || opponentKingEye,
-                kingPeekedSlots: opponentKingPeeked,
-                swapSelectable: swapOpponent,
-                isThinking: isOpponentTurn,
-                onTapCard: (i) {
-                  if (phase == _Phase.powerPeekOpponent) {
-                    _onPeekOpponent(i, myUid);
-                  } else if (opponentKingEye) {
-                    _onKingPeek(false, i, myUid, oppUid);
-                  } else if (phase == _Phase.powerSwapSelectOpponent) {
-                    _onSwapSelectOpponent(i, myUid);
-                  }
-                },
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              _RoundsBadge(
-                remaining: roundsRemaining,
-                currentPartida: currentPartida,
-                playerWins: myWins,
-                opponentWins: oppWins,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              _PhaseHint(
-                phase: phase,
-                peeksUsed: _initialPeekShowing.length,
-                kingCount: kingTargets.length,
-                swapOwnSelected: _swapOwnSlot != null,
-                kingPickedOwn: hasOwnKingTarget,
-                kingPickedOpp: hasOppKingTarget,
-              ),
-              const Spacer(),
-              _TurnIndicator(
-                  isPlayerTurn: !isOpponentTurn && pending == null),
-              const SizedBox(height: AppSpacing.base),
-              _TableCenter(
-                deckCount: game.deck.length,
-                discardStack: _discardEntries(game.discard),
-                drawnCard: game.drawnCard,
-                canDraw: !isOpponentTurn &&
-                    game.drawnCard == null &&
-                    pending == null &&
-                    (game.phase == GamePhase.turn ||
-                        game.phase == GamePhase.awaitingLastTurn),
-                onDrawCard: () => _drawCard(myUid),
-                onDiscardDrawn: () => _discardDrawn(myUid),
-              ),
-              const Spacer(),
-              _ActionBar(
-                phase: phase,
-                isOpponentTurn: isOpponentTurn,
-                cutPending: false,
-                onCut: () => _handleCut(myUid),
-                onMirror: () => _handleMirror(game, myUid),
-                onKingSwap: () => _kingDecide(true, game, myUid),
-                onKingKeep: () => _kingDecide(false, game, myUid),
-              ),
-              const SizedBox(height: AppSpacing.base),
-              _PlayerHand(
-                playerCards: myCards,
-                phase: phase,
-                revealingSlot: _revealOwnSlot,
-                kingPeekedSlots: playerKingPeeked,
-                justSwappedSlots: _justSwappedSlots,
-                initialPeekShowing: _initialPeekShowing,
-                swapOwnSlot: _swapOwnSlot,
-                ownKingEyeEnabled: ownKingEyeEnabled,
-                onTapCard: (i) {
-                  if (phase == _Phase.peekInitial) {
-                    _onTapInitialPeek(i, myUid);
-                  } else if (phase == _Phase.cardDrawn) {
-                    _swapWithSlot(i, myUid);
-                  } else if (phase == _Phase.powerPeekOwn) {
-                    _onPeekOwn(i, myUid);
-                  } else if (ownKingEyeEnabled) {
-                    _onKingPeek(true, i, myUid, oppUid);
-                  } else if (phase == _Phase.powerSwapSelectOwn) {
-                    _onSwapSelectOwn(i);
-                  }
-                },
-              ),
-              const SizedBox(height: AppSpacing.xl),
-            ]),
-          ),
+          child: Column(children: [
+            _OpponentSection(
+              opponentCards: oppCards,
+              revealingSlot: _revealOpponentSlot,
+              peekEye: opponentEye || opponentKingEye,
+              kingPeekedSlots: opponentKingPeeked,
+              swapSelectable: swapOpponent,
+              isThinking: isOpponentTurn,
+              onTapCard: (i) {
+                if (phase == _Phase.powerPeekOpponent) {
+                  _onPeekOpponent(i, myUid);
+                } else if (opponentKingEye) {
+                  _onKingPeek(false, i, myUid, oppUid);
+                } else if (phase == _Phase.powerSwapSelectOpponent) {
+                  _onSwapSelectOpponent(i, myUid);
+                }
+              },
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            _RoundsBadge(
+              remaining: roundsRemaining,
+              currentPartida: currentPartida,
+              playerWins: myWins,
+              opponentWins: oppWins,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            _PhaseHint(
+              phase: phase,
+              peeksUsed: _initialPeekShowing.length,
+              kingCount: kingTargets.length,
+              swapOwnSelected: _swapOwnSlot != null,
+              kingPickedOwn: hasOwnKingTarget,
+              kingPickedOpp: hasOppKingTarget,
+            ),
+            const Spacer(),
+            _TurnIndicator(
+                isPlayerTurn: !isOpponentTurn && pending == null),
+            const SizedBox(height: AppSpacing.sm),
+            _TableCenter(
+              deckCount: game.deck.length,
+              discardStack: _discardEntries(game.discard),
+              drawnCard: game.drawnCard,
+              canDraw: !isOpponentTurn &&
+                  game.drawnCard == null &&
+                  pending == null &&
+                  (game.phase == GamePhase.turn ||
+                      game.phase == GamePhase.awaitingLastTurn),
+              onDrawCard: () => _drawCard(myUid),
+              onDiscardDrawn: () => _discardDrawn(myUid),
+            ),
+            const Spacer(),
+            _ActionBar(
+              phase: phase,
+              isOpponentTurn: isOpponentTurn,
+              cutPending: false,
+              onCut: () => _handleCut(myUid),
+              onMirror: () => _handleMirror(game, myUid),
+              onKingSwap: () => _kingDecide(true, game, myUid),
+              onKingKeep: () => _kingDecide(false, game, myUid),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            _PlayerHand(
+              playerCards: myCards,
+              phase: phase,
+              revealingSlot: _revealOwnSlot,
+              kingPeekedSlots: playerKingPeeked,
+              justSwappedSlots: _justSwappedSlots,
+              initialPeekShowing: _initialPeekShowing,
+              swapOwnSlot: _swapOwnSlot,
+              ownKingEyeEnabled: ownKingEyeEnabled,
+              onTapCard: (i) {
+                if (phase == _Phase.peekInitial) {
+                  _onTapInitialPeek(i, myUid);
+                } else if (phase == _Phase.cardDrawn) {
+                  _swapWithSlot(i, myUid);
+                } else if (phase == _Phase.powerPeekOwn) {
+                  _onPeekOwn(i, myUid);
+                } else if (ownKingEyeEnabled) {
+                  _onKingPeek(true, i, myUid, oppUid);
+                } else if (phase == _Phase.powerSwapSelectOwn) {
+                  _onSwapSelectOwn(i);
+                }
+              },
+            ),
+            const SizedBox(height: AppSpacing.sm),
+          ]),
         ),
       ),
       Positioned.fill(
