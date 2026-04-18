@@ -746,12 +746,6 @@ class _ArenaScreenState extends State<ArenaScreen> {
     _endPlayerTurn();
   }
 
-  // ── Demo shortcuts ────────────────────────────────────────────────────────────
-  void _demoPower(int rank) {
-    if (_phase == _Phase.peekInitial) return;
-    _activatePower(GameCard.regular(Suit.spades, rank));
-  }
-
   // ── Exit confirmation ────────────────────────────────────────────────────────
   void _confirmExit(BuildContext context) {
     showDialog(
@@ -920,9 +914,9 @@ class _ArenaScreenState extends State<ArenaScreen> {
                 kingCount: _kingTargets.length, swapOwnSelected: _swapOwnSlot != null,
                 kingPickedOwn: hasOwnKingTarget, kingPickedOpp: hasOppKingTarget,
               ),
-              const SizedBox(height: AppSpacing.xs),
-              _PowerDemoBar(onDemo: _demoPower, enabled: _phase == _Phase.turn && !_isOpponentTurn),
               const Spacer(),
+              _TurnIndicator(isPlayerTurn: _phase == _Phase.turn && !_isOpponentTurn),
+              const SizedBox(height: AppSpacing.sm),
               _TableCenter(
                 deckCount: _deck.length,
                 discardStack: _discardStack,
@@ -931,7 +925,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
                 onDrawCard: _drawCard,
                 onDiscardDrawn: _discardDrawn,
               ),
-              const SizedBox(height: AppSpacing.sm),
+              const Spacer(),
               _ActionBar(
                 phase: _phase,
                 isOpponentTurn: _isOpponentTurn,
@@ -940,8 +934,6 @@ class _ArenaScreenState extends State<ArenaScreen> {
                 onKingSwap: () => _kingDecide(true),
                 onKingKeep: () => _kingDecide(false),
               ),
-              const SizedBox(height: AppSpacing.xs),
-              _TurnIndicator(isPlayerTurn: _phase == _Phase.turn && !_isOpponentTurn),
               const SizedBox(height: AppSpacing.xs),
               _PlayerHand(
                 playerCards: _playerCards,
@@ -1436,38 +1428,6 @@ class _PhaseHint extends StatelessWidget {
     if (text.isEmpty) return const SizedBox.shrink();
     return Text(text, style: AppText.caption.copyWith(color: color, fontWeight: FontWeight.w500),
         textAlign: TextAlign.center);
-  }
-}
-
-// ─── Power Demo Bar ───────────────────────────────────────────────────────────
-
-class _PowerDemoBar extends StatelessWidget {
-  final void Function(int rank) onDemo;
-  final bool enabled;
-  const _PowerDemoBar({required this.onDemo, required this.enabled});
-
-  @override
-  Widget build(BuildContext context) {
-    const powers = [(7, '7/8', AppColors.accent), (9, '9/10', AppColors.warning),
-      (11, 'J/Q', AppColors.success), (13, 'REY', AppColors.primary)];
-    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Text('DEMO  ', style: AppText.caption.copyWith(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w700)),
-      ...powers.map((p) => Padding(
-        padding: const EdgeInsets.only(right: 4),
-        child: GestureDetector(
-          onTap: enabled ? () => onDemo(p.$1) : null,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-              border: Border.all(color: enabled ? p.$3 : AppColors.border, width: 1),
-            ),
-            child: Text(p.$2, style: TextStyle(
-                color: enabled ? p.$3 : AppColors.textMuted, fontSize: 9, fontWeight: FontWeight.w700)),
-          ),
-        ),
-      )),
-    ]);
   }
 }
 
