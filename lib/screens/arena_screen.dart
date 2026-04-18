@@ -751,8 +751,10 @@ class _ArenaScreenState extends State<ArenaScreen> {
   }
 
   // ── Mirror (Espejo) ──────────────────────────────────────────────────────────
+  // Espejo is a free action: usable at any phase (except peekInitial) and during
+  // opponent's turn. It never consumes the player's turn — play continues normally.
   void _handleMirror() {
-    if (_phase != _Phase.turn || _isOpponentTurn || _discardStack.isEmpty) return;
+    if (_phase == _Phase.peekInitial || _discardStack.isEmpty) return;
     final topCard = _discardStack.last.card;
     final matchIndices = <int>[];
     for (int i = 0; i < _playerCards.length; i++) {
@@ -761,9 +763,9 @@ class _ArenaScreenState extends State<ArenaScreen> {
       if (matches) matchIndices.add(i);
     }
     if (matchIndices.isEmpty) {
+      // Miss: +5 penalty, turn unaffected
       setState(() => _playerPenalty += 5);
       _showBanner('¡FALLASTE!', '+5 puntos de penalidad', AppColors.danger);
-      _endPlayerTurn();
     } else {
       final newCards = [
         for (int i = 0; i < _playerCards.length; i++)
@@ -778,16 +780,17 @@ class _ArenaScreenState extends State<ArenaScreen> {
         _discardStack = newDiscard;
       });
       if (newCards.isEmpty) {
+        // No cards left → end partida after rival's last turn
         _showBanner('¡ESPEJO! Sin cartas', 'Última vuelta del rival', AppColors.success);
         _opponentTimer?.cancel();
         setState(() => _isOpponentTurn = true);
-        _opponentTimer = Timer(const Duration(seconds: 3), () {
+        _opponentTimer = Timer(const Duration(seconds: 2), () {
           if (mounted) { setState(() => _isOpponentTurn = false); _endPartida(); }
         });
       } else {
         final n = matchIndices.length;
         _showBanner('¡ESPEJO!', '$n carta${n > 1 ? 's' : ''} al descarte', AppColors.success);
-        _endPlayerTurn();
+        // Turn continues — no state change
       }
     }
   }
@@ -1567,30 +1570,38 @@ class _ActionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ESPEJO is a free action always available (except initial peek)
+    final espejoBtn = Expanded(child: _Btn(
+      label: '¡ESPEJO!', icon: Icons.copy_all_rounded,
+      color: AppColors.success, solid: true, onTap: onMirror,
+    ));
+
+    if (phase == _Phase.peekInitial) return const SizedBox(height: 52);
+
+    Widget child;
+    if (phase == _Phase.powerKingDecide) {
+      // Three buttons: intercambiar | dejar | espejo
+      child = Row(children: [
+        Expanded(child: _Btn(label: '¡CAMBIAR!', icon: Icons.swap_horiz_rounded, color: AppColors.primary, solid: true, onTap: onKingSwap)),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(child: _Btn(label: 'DEJAR', icon: Icons.close_rounded, color: AppColors.danger, solid: false, onTap: onKingKeep)),
+        const SizedBox(width: AppSpacing.sm),
+        espejoBtn,
+      ]);
+    } else if (phase == _Phase.turn) {
+      child = Row(children: [
+        Expanded(child: _Btn(label: 'CORTAR', icon: Icons.content_cut_rounded, color: AppColors.danger, solid: false, onTap: isOpponentTurn ? () {} : onCut, disabled: isOpponentTurn)),
+        const SizedBox(width: AppSpacing.md),
+        espejoBtn,
+      ]);
+    } else {
+      // cardDrawn, powerPeek*, powerSwap*, powerKingPeek: espejo only
+      child = Row(children: [espejoBtn]);
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base),
-      child: switch (phase) {
-        _Phase.powerKingDecide => Row(children: [
-          Expanded(child: _Btn(label: '¡INTERCAMBIAR!', icon: Icons.swap_horiz_rounded, color: AppColors.primary, solid: true, onTap: onKingSwap)),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(child: _Btn(label: 'DEJAR ASÍ', icon: Icons.close_rounded, color: AppColors.danger, solid: false, onTap: onKingKeep)),
-        ]),
-        _Phase.cardDrawn => Center(child: Text(
-          'Tocá una carta tuya para intercambiar',
-          style: AppText.caption.copyWith(color: AppColors.primary, fontWeight: FontWeight.w500),
-          textAlign: TextAlign.center)),
-        _Phase.peekInitial ||
-        _Phase.powerPeekOwn ||
-        _Phase.powerPeekOpponent ||
-        _Phase.powerSwapSelectOwn ||
-        _Phase.powerSwapSelectOpponent ||
-        _Phase.powerKingPeek => const SizedBox(height: 52),
-        _ => Row(children: [
-          Expanded(child: _Btn(label: 'CORTAR', icon: Icons.content_cut_rounded, color: AppColors.danger, solid: false, onTap: isOpponentTurn ? () {} : onCut, disabled: isOpponentTurn)),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(child: _Btn(label: '¡ESPEJO!', icon: Icons.copy_all_rounded, color: AppColors.success, solid: true, onTap: isOpponentTurn ? () {} : onMirror, disabled: isOpponentTurn)),
-        ]),
-      },
+      child: child,
     );
   }
 }
@@ -1685,7 +1696,7 @@ class _PlayerHand extends StatelessWidget {
     const purple = AppColors.cardInkJoker;
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(4, (i) {
+      children: List.generate(playerCards.length, (i) {
         final card = playerCards[i];
         final isRevealing = revealingSlot == i;
         final isKingPeeked = kingPeekedSlots.contains(i);
