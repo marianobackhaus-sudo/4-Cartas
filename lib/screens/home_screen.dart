@@ -160,6 +160,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           side: const BorderSide(color: AppColors.primary),
                         ),
                       ),
+                      const SizedBox(height: AppSpacing.sm),
+                      TextButton.icon(
+                        onPressed: _busy ? null : () => context.go('/arena'),
+                        icon: const Icon(Icons.videogame_asset_rounded,
+                            size: 18),
+                        label: const Text('Pantalla ARENA (demo compa)'),
+                      ),
                     ],
                     const SizedBox(height: AppSpacing.xl),
                     const Row(
