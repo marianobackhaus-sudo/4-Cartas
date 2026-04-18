@@ -176,6 +176,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     solid: false,
                     onTap: _busy ? null : _onUnirse,
                   ),
+                  const SizedBox(height: AppSpacing.base),
+                  _HomeButton(
+                    label: 'TIENDA',
+                    icon: Icons.shopping_bag_rounded,
+                    color: AppColors.warning,
+                    textColor: AppColors.warning,
+                    solid: false,
+                    onTap: _busy ? null : () => context.go('/tienda'),
+                  ),
                   if (_busy) ...[
                     const SizedBox(height: AppSpacing.base),
                     const Center(child: CircularProgressIndicator()),
@@ -330,7 +339,7 @@ class _CodeField extends StatelessWidget {
           style: AppText.hero.copyWith(fontSize: 28, letterSpacing: 6),
           textAlign: TextAlign.center,
           textCapitalization: TextCapitalization.characters,
-          maxLength: 8,
+          maxLength: 6,
           decoration: InputDecoration(
             hintText: 'XKQZ47',
             hintStyle: AppText.hero.copyWith(

@@ -5,6 +5,7 @@ import 'screens/game_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/lobby_screen.dart';
 import 'screens/match_result_screen.dart';
+import 'screens/tienda_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/',
@@ -32,6 +33,10 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/arena',
       builder: (_, _) => const ArenaScreen(),
+    ),
+    GoRoute(
+      path: '/tienda',
+      builder: (_, _) => const TiendaScreen(),
     ),
   ],
 );
