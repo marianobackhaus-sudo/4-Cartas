@@ -524,14 +524,17 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
     });
   }
 
-  Future<void> _runAction(Future<void> Function() op) async {
+  /// Returns true if the op succeeded, false if it threw.
+  Future<bool> _runAction(Future<void> Function() op) async {
     try {
       await op();
+      return true;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString())),
       );
+      return false;
     }
   }
 
@@ -719,7 +722,9 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
     if (lastRank == null) return;
     final card = g.player(myUid).slots[slotIndex].card;
     final isMatch = !card.isJoker && card.rank == lastRank;
-    await _runAction(() => _ctrl().mirrorAttempt(myUid, slotIndex));
+    final ok =
+        await _runAction(() => _ctrl().mirrorAttempt(myUid, slotIndex));
+    if (!ok) return;
     if (isMatch) {
       _showBanner('¡ESPEJO!', 'Carta al descarte', AppColors.success);
     } else {
