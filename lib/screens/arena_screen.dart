@@ -707,9 +707,36 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
   /// engine registers a miss → +5 penalty. Can be tapped at any time by either
   /// player.
   Future<void> _handleMirror(GameState g, String myUid) async {
-    final lastRank = g.lastDiscardRank;
-    if (lastRank == null) return;
     final mySlots = g.player(myUid).slots;
+    if (mySlots.isEmpty) return;
+
+    // Preemptive guards: give user feedback instead of silently doing nothing.
+    if (g.pending != null) {
+      _showBanner('ESPEJO BLOQUEADO',
+          'Esperá a que se resuelva el poder', AppColors.warning);
+      return;
+    }
+    if (g.phase != GamePhase.turn &&
+        g.phase != GamePhase.awaitingLastTurn) {
+      _showBanner('ESPEJO NO DISPONIBLE',
+          'No se puede ahora (${g.phase.name})', AppColors.warning);
+      return;
+    }
+
+    final lastRank = g.lastDiscardRank;
+    final lastIsJoker =
+        g.discard.isNotEmpty && g.discard.last.isJoker;
+    if (lastRank == null) {
+      _showBanner(
+        'ESPEJO NO DISPONIBLE',
+        lastIsJoker
+            ? 'Último descarte es un joker'
+            : 'No hay carta en el descarte',
+        AppColors.warning,
+      );
+      return;
+    }
+
     int? matchSlot;
     for (var i = 0; i < mySlots.length; i++) {
       final c = mySlots[i].card;
@@ -720,7 +747,6 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
     }
     final isMatch = matchSlot != null;
     final slot = matchSlot ?? 0;
-    if (mySlots.isEmpty) return;
     final ok = await _runAction(() => _ctrl().mirrorAttempt(myUid, slot));
     if (!ok) return;
     if (isMatch) {
