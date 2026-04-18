@@ -881,6 +881,39 @@ class _ArenaScreenState extends State<ArenaScreen> {
   }
 }
 
+// ─── Coin Stack Icon ─────────────────────────────────────────────────────────
+
+class _CoinStackIcon extends StatelessWidget {
+  final double size;
+  final Color color;
+  const _CoinStackIcon({this.size = 28, this.color = AppColors.primary});
+
+  Widget _coin(double w, double h, double alpha) => Container(
+    width: w, height: h,
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: alpha * .85),
+      borderRadius: BorderRadius.circular(h / 2),
+      border: Border.all(color: color, width: 1.2),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final w = size * 1.15;
+    final h = size * 0.32;
+    final gap = h * 0.72;
+    return SizedBox(
+      width: w,
+      height: h + gap * 2,
+      child: Stack(alignment: Alignment.bottomCenter, children: [
+        Positioned(bottom: 0,       child: _coin(w, h, 1.0)),
+        Positioned(bottom: gap,     child: _coin(w, h, 0.80)),
+        Positioned(bottom: gap * 2, child: _coin(w, h, 0.60)),
+      ]),
+    );
+  }
+}
+
 // ─── Game Over Overlay ────────────────────────────────────────────────────────
 
 class _GameOverOverlay extends StatelessWidget {
@@ -1036,48 +1069,50 @@ class _GameOverOverlay extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.xl),
 
-              // Coin reward
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.md),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [AppColors.primary.withValues(alpha: .18), AppColors.warning.withValues(alpha: .10)],
-                  ),
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(color: AppColors.primary.withValues(alpha: .5)),
-                ),
-                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  const Icon(Icons.monetization_on_rounded, color: AppColors.primary, size: 28),
-                  const SizedBox(width: AppSpacing.sm),
-                  Text('+${playerWinsPartida || tied ? 100 : 25}', style: const TextStyle(
-                      color: AppColors.primary, fontSize: 32, fontWeight: FontWeight.w800,
-                      fontFeatures: [FontFeature.tabularFigures()])),
-                  const SizedBox(width: AppSpacing.xs),
-                  Text('monedas', style: AppText.label.copyWith(color: AppColors.primary)),
-                ]),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-
-              // Watch video to double
-              GestureDetector(
-                onTap: () {},
-                child: Container(
-                  width: double.infinity,
-                  height: 48,
+              if (matchOver) ...[
+                // Coin reward — only shown when match is fully decided
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.md),
                   decoration: BoxDecoration(
-                    color: AppColors.warning.withValues(alpha: .12),
-                    borderRadius: BorderRadius.circular(AppRadius.md),
-                    border: Border.all(color: AppColors.warning, width: 1.5),
+                    gradient: LinearGradient(
+                      colors: [AppColors.primary.withValues(alpha: .18), AppColors.warning.withValues(alpha: .10)],
+                    ),
+                    borderRadius: BorderRadius.circular(AppRadius.lg),
+                    border: Border.all(color: AppColors.primary.withValues(alpha: .5)),
                   ),
                   child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    const Icon(Icons.play_circle_outline_rounded, color: AppColors.warning, size: 20),
+                    _CoinStackIcon(size: 30, color: AppColors.primary),
                     const SizedBox(width: AppSpacing.sm),
-                    Text('VER VIDEO Y DUPLICAR', style: TextStyle(
-                        color: AppColors.warning, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                    Text('+${playerWinsPartida || tied ? 100 : 25}', style: const TextStyle(
+                        color: AppColors.primary, fontSize: 32, fontWeight: FontWeight.w800,
+                        fontFeatures: [FontFeature.tabularFigures()])),
+                    const SizedBox(width: AppSpacing.xs),
+                    Text('monedas', style: AppText.label.copyWith(color: AppColors.primary)),
                   ]),
                 ),
-              ),
-              const SizedBox(height: AppSpacing.xl),
+                const SizedBox(height: AppSpacing.sm),
+
+                // Watch video to double
+                GestureDetector(
+                  onTap: () {},
+                  child: Container(
+                    width: double.infinity,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withValues(alpha: .12),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      border: Border.all(color: AppColors.warning, width: 1.5),
+                    ),
+                    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      const Icon(Icons.play_circle_outline_rounded, color: AppColors.warning, size: 20),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text('VER VIDEO Y DUPLICAR', style: TextStyle(
+                          color: AppColors.warning, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                    ]),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xl),
+              ],
 
               // Main action buttons
               Row(children: [
