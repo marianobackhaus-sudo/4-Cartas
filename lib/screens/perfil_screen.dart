@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/design_tokens.dart';
 import '../core/typography.dart';
+import '../state/auth_providers.dart';
 import '../state/providers.dart';
 
 const _kAppVersion = 'v1.0.0';
@@ -102,7 +103,7 @@ class PerfilScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final username = FirebaseAuth.instance.currentUser?.displayName ?? '—';
+    final username = ref.watch(currentUserProvider).valueOrNull?.displayName ?? '—';
     return Scaffold(
       backgroundColor: AppColors.bgDeepest,
       appBar: AppBar(

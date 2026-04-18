@@ -1,4 +1,3 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -336,12 +335,12 @@ class _CodeField extends StatelessWidget {
 
 // ─── Welcome Header ───────────────────────────────────────────────────────────
 
-class _WelcomeHeader extends StatelessWidget {
+class _WelcomeHeader extends ConsumerWidget {
   const _WelcomeHeader();
 
   @override
-  Widget build(BuildContext context) {
-    final name = FirebaseAuth.instance.currentUser?.displayName ?? '';
+  Widget build(BuildContext context, WidgetRef ref) {
+    final name = ref.watch(currentUserProvider).valueOrNull?.displayName ?? '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
