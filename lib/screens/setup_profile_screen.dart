@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../core/design_tokens.dart';
 import '../core/typography.dart';
 import '../state/providers.dart';
+import '../widgets/avatar_widget.dart';
 
 class SetupProfileScreen extends ConsumerStatefulWidget {
   const SetupProfileScreen({super.key});
@@ -17,12 +19,35 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   bool _busy = false;
+  bool _avatarLoading = false;
   String? _errorMessage;
 
   @override
   void dispose() {
     _usernameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAvatar() async {
+    setState(() => _avatarLoading = true);
+    try {
+      final url = await pickAndUploadAvatar(context);
+      if (url != null) {
+        await FirebaseAuth.instance.currentUser!.updatePhotoURL(url);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudo subir la foto', style: AppText.body),
+            backgroundColor: AppColors.surfaceElevated,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _avatarLoading = false);
+    }
   }
 
   String? _validateUsername(String? v) {
@@ -52,6 +77,8 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final photoUrl = FirebaseAuth.instance.currentUser?.photoURL;
+
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
@@ -68,8 +95,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
           ),
           child: SafeArea(
             child: SingleChildScrollView(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: AppSpacing.base),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base),
               child: Form(
                 key: _formKey,
                 child: Column(
@@ -88,73 +114,15 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: AppSpacing.xl5),
-                    // Avatar placeholder
                     Center(
-                      child: GestureDetector(
-                        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Foto de perfil — próximamente',
-                              style: AppText.body,
-                            ),
-                            backgroundColor: AppColors.surfaceElevated,
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        ),
-                        child: Stack(
-                          children: [
-                            Container(
-                              width: 110,
-                              height: 110,
-                              decoration: BoxDecoration(
-                                color: AppColors.surfaceElevated,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: AppColors.primary,
-                                  width: 2,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color:
-                                        AppColors.primary.withValues(alpha: 0.25),
-                                    blurRadius: 24,
-                                    spreadRadius: 2,
-                                  ),
-                                ],
-                              ),
-                              child: const Icon(
-                                Icons.person_rounded,
-                                color: AppColors.textMuted,
-                                size: 58,
-                              ),
-                            ),
-                            Positioned(
-                              bottom: 2,
-                              right: 2,
-                              child: Container(
-                                width: 32,
-                                height: 32,
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: AppColors.bgDeepest,
-                                    width: 2,
-                                  ),
-                                ),
-                                child: const Icon(
-                                  Icons.camera_alt_rounded,
-                                  color: AppColors.onPrimary,
-                                  size: 16,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                      child: AvatarCircle(
+                        photoUrl: photoUrl,
+                        size: 110,
+                        loading: _avatarLoading,
+                        onTap: _avatarLoading ? null : _pickAvatar,
                       ),
                     ),
                     const SizedBox(height: AppSpacing.xl5),
-                    // Username field
                     Text(
                       'NOMBRE DE USUARIO',
                       style: AppText.label.copyWith(letterSpacing: 1.5),
@@ -169,8 +137,7 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                       validator: _validateUsername,
                       decoration: InputDecoration(
                         hintText: 'NEON_DRIFTER',
-                        hintStyle:
-                            AppText.body.copyWith(color: AppColors.textMuted),
+                        hintStyle: AppText.body.copyWith(color: AppColors.textMuted),
                         filled: true,
                         fillColor: AppColors.surfaceElevated,
                         counterText: '',
@@ -185,26 +152,21 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(AppRadius.md),
-                          borderSide:
-                              const BorderSide(color: AppColors.border),
+                          borderSide: const BorderSide(color: AppColors.border),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(AppRadius.md),
-                          borderSide: const BorderSide(
-                              color: AppColors.primary, width: 2),
+                          borderSide: const BorderSide(color: AppColors.primary, width: 2),
                         ),
                         errorBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(AppRadius.md),
-                          borderSide: const BorderSide(
-                              color: AppColors.danger, width: 2),
+                          borderSide: const BorderSide(color: AppColors.danger, width: 2),
                         ),
                         focusedErrorBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(AppRadius.md),
-                          borderSide: const BorderSide(
-                              color: AppColors.danger, width: 2),
+                          borderSide: const BorderSide(color: AppColors.danger, width: 2),
                         ),
-                        errorStyle:
-                            AppText.caption.copyWith(color: AppColors.danger),
+                        errorStyle: AppText.caption.copyWith(color: AppColors.danger),
                       ),
                     ),
                     if (_errorMessage != null) ...[
@@ -214,14 +176,11 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                         decoration: BoxDecoration(
                           color: AppColors.danger.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(AppRadius.md),
-                          border: Border.all(
-                            color: AppColors.danger.withValues(alpha: 0.4),
-                          ),
+                          border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
                         ),
                         child: Text(
                           _errorMessage!,
-                          style:
-                              AppText.caption.copyWith(color: AppColors.danger),
+                          style: AppText.caption.copyWith(color: AppColors.danger),
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -235,12 +194,10 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
                               height: 52,
                               decoration: BoxDecoration(
                                 color: AppColors.primary,
-                                borderRadius:
-                                    BorderRadius.circular(AppRadius.md),
+                                borderRadius: BorderRadius.circular(AppRadius.md),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: AppColors.primary
-                                        .withValues(alpha: 0.4),
+                                    color: AppColors.primary.withValues(alpha: 0.4),
                                     blurRadius: 18,
                                     offset: const Offset(0, 4),
                                   ),

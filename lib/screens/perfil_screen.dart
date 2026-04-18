@@ -5,6 +5,7 @@ import '../core/design_tokens.dart';
 import '../core/typography.dart';
 import '../state/auth_providers.dart';
 import '../state/providers.dart';
+import '../widgets/avatar_widget.dart';
 
 const _kAppVersion = 'v1.0.0';
 
@@ -139,7 +140,12 @@ class PerfilScreen extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: AppSpacing.xl2),
-                const Center(child: _AvatarCircle()),
+                Center(
+                  child: AvatarCircle(
+                    photoUrl: ref.watch(currentUserProvider).valueOrNull?.photoURL,
+                    size: 100,
+                  ),
+                ),
                 const SizedBox(height: AppSpacing.base),
                 Text(
                   username,
@@ -189,36 +195,6 @@ class PerfilScreen extends ConsumerWidget {
   }
 }
 
-// ─── Avatar Circle ────────────────────────────────────────────────────────────
-
-class _AvatarCircle extends StatelessWidget {
-  const _AvatarCircle();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 100,
-      height: 100,
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        shape: BoxShape.circle,
-        border: Border.all(color: AppColors.primary, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.25),
-            blurRadius: 24,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: const Icon(
-        Icons.person_rounded,
-        color: AppColors.textMuted,
-        size: 52,
-      ),
-    );
-  }
-}
 
 // ─── Menu Group ───────────────────────────────────────────────────────────────
 
@@ -398,6 +374,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   );
   final _passwordController = TextEditingController();
   bool _busy = false;
+  bool _avatarLoading = false;
   bool _obscurePassword = true;
   String? _errorMessage;
   String? _successMessage;
@@ -407,6 +384,28 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAvatar() async {
+    setState(() => _avatarLoading = true);
+    try {
+      final url = await pickAndUploadAvatar(context);
+      if (url != null) {
+        await FirebaseAuth.instance.currentUser!.updatePhotoURL(url);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudo subir la foto', style: AppText.body),
+            backgroundColor: AppColors.surface,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _avatarLoading = false);
+    }
   }
 
   String? _validateUsername(String? v) {
@@ -488,45 +487,11 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
               const SizedBox(height: AppSpacing.xl2),
               // Avatar
               Center(
-                child: GestureDetector(
-                  onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Foto de perfil — próximamente', style: AppText.body),
-                      backgroundColor: AppColors.surface,
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  ),
-                  child: Stack(
-                    children: [
-                      Container(
-                        width: 88, height: 88,
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: AppColors.primary, width: 2),
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.primary.withValues(alpha: 0.2),
-                              blurRadius: 16,
-                            ),
-                          ],
-                        ),
-                        child: const Icon(Icons.person_rounded, color: AppColors.textMuted, size: 44),
-                      ),
-                      Positioned(
-                        bottom: 0, right: 0,
-                        child: Container(
-                          width: 28, height: 28,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.surfaceElevated, width: 2),
-                          ),
-                          child: const Icon(Icons.camera_alt_rounded, color: AppColors.onPrimary, size: 14),
-                        ),
-                      ),
-                    ],
-                  ),
+                child: AvatarCircle(
+                  photoUrl: FirebaseAuth.instance.currentUser?.photoURL,
+                  size: 88,
+                  loading: _avatarLoading,
+                  onTap: _avatarLoading ? null : _pickAvatar,
                 ),
               ),
               const SizedBox(height: AppSpacing.xl2),
