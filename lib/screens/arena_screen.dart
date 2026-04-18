@@ -947,7 +947,7 @@ class _GameOverOverlay extends StatelessWidget {
       resultColor = AppColors.danger;
     }
 
-    final String actionLabel = matchOver ? 'NUEVA PARTIDA' : 'SIGUIENTE PARTIDA';
+    final String actionLabel = matchOver ? 'NUEVA PARTIDA' : 'SEGUIR';
     final VoidCallback actionTap = matchOver ? onNewMatch : onNextPartida;
 
     return Container(
