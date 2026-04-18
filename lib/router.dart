@@ -5,10 +5,12 @@ import 'screens/game_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/lobby_screen.dart';
 import 'screens/match_result_screen.dart';
+import 'screens/editar_perfil_screen.dart';
+import 'screens/perfil_screen.dart';
 import 'screens/tienda_screen.dart';
 
 final appRouter = GoRouter(
-  initialLocation: '/',
+  initialLocation: '/perfil',
   routes: [
     GoRoute(
       path: '/',
@@ -37,6 +39,14 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/tienda',
       builder: (_, _) => const TiendaScreen(),
+    ),
+    GoRoute(
+      path: '/perfil',
+      builder: (_, _) => const PerfilScreen(),
+    ),
+    GoRoute(
+      path: '/perfil/editar',
+      builder: (_, _) => const EditarPerfilScreen(),
     ),
   ],
 );
