@@ -26,9 +26,15 @@ Future<String?> pickAndUploadAvatar(BuildContext context) async {
   if (picked == null) return null;
 
   final uid = FirebaseAuth.instance.currentUser!.uid;
-  final ref = FirebaseStorage.instance.ref('profile_photos/$uid.jpg');
-  await ref.putFile(File(picked.path));
-  return ref.getDownloadURL();
+  final storageRef = FirebaseStorage.instance.ref('profile_photos/$uid.jpg');
+  final task = await storageRef.putFile(
+    File(picked.path),
+    SettableMetadata(contentType: 'image/jpeg'),
+  );
+  if (task.state != TaskState.success) {
+    throw Exception('Upload failed: ${task.state}');
+  }
+  return storageRef.getDownloadURL();
 }
 
 class _SourceSheet extends StatelessWidget {

@@ -35,12 +35,12 @@ class _SetupProfileScreenState extends ConsumerState<SetupProfileScreen> {
       if (url != null) {
         await FirebaseAuth.instance.currentUser!.updatePhotoURL(url);
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('No se pudo subir la foto', style: AppText.body),
-            backgroundColor: AppColors.surfaceElevated,
+            content: Text('Error: $e', style: AppText.body),
+            backgroundColor: AppColors.danger,
             behavior: SnackBarBehavior.floating,
           ),
         );
