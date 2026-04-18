@@ -438,6 +438,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
   bool _isOpponentTurn = false;
   Timer? _opponentTimer;
 
+  // ── settings ─────────────────────────────────────────────────────────────────
+  double _musicVolume = 0.8;
+  double _fxVolume = 1.0;
+  bool _hapticEnabled = true;
+
   // ── banner ────────────────────────────────────────────────────────────────────
   bool _bannerVisible = false;
   String _bannerText = '';
@@ -747,6 +752,113 @@ class _ArenaScreenState extends State<ArenaScreen> {
     _activatePower(GameCard.regular(Suit.spades, rank));
   }
 
+  // ── Exit confirmation ────────────────────────────────────────────────────────
+  void _confirmExit(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.xl)),
+        title: const Text('¿Salir del juego?',
+            style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w700, fontSize: 18)),
+        content: const Text('Perderás el progreso de la partida actual.',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () { Navigator.pop(ctx); Navigator.of(context).pop(); },
+            child: const Text('Salir', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Settings sheet ────────────────────────────────────────────────────────────
+  void _openSettings(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final sliderTheme = SliderThemeData(
+            activeTrackColor: AppColors.primary,
+            inactiveTrackColor: AppColors.border,
+            thumbColor: AppColors.primary,
+            overlayColor: AppColors.primary.withValues(alpha: .18),
+            trackHeight: 3,
+          );
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.xl, AppSpacing.base, AppSpacing.xl, AppSpacing.xl2),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 36, height: 4,
+                  decoration: BoxDecoration(color: AppColors.border,
+                      borderRadius: BorderRadius.circular(AppRadius.pill))),
+              const SizedBox(height: AppSpacing.xl),
+              const Text('CONFIGURACIÓN', style: TextStyle(
+                  color: AppColors.textPrimary, fontSize: 15,
+                  fontWeight: FontWeight.w800, letterSpacing: 2)),
+              const SizedBox(height: AppSpacing.xl2),
+
+              // Música
+              Row(children: [
+                const Icon(Icons.music_note_rounded, color: AppColors.textSecondary, size: 20),
+                const SizedBox(width: AppSpacing.sm),
+                const Text('Música', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w500)),
+                const Spacer(),
+                Text('${(_musicVolume * 100).round()}%', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+              ]),
+              SliderTheme(
+                data: sliderTheme,
+                child: Slider(
+                  value: _musicVolume,
+                  onChanged: (v) { setState(() => _musicVolume = v); setSheet(() {}); },
+                ),
+              ),
+
+              // Sonido FX
+              Row(children: [
+                const Icon(Icons.volume_up_rounded, color: AppColors.textSecondary, size: 20),
+                const SizedBox(width: AppSpacing.sm),
+                const Text('Sonido FX', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w500)),
+                const Spacer(),
+                Text('${(_fxVolume * 100).round()}%', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+              ]),
+              SliderTheme(
+                data: sliderTheme,
+                child: Slider(
+                  value: _fxVolume,
+                  onChanged: (v) { setState(() => _fxVolume = v); setSheet(() {}); },
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.xs),
+              // Vibración
+              Row(children: [
+                const Icon(Icons.vibration_rounded, color: AppColors.textSecondary, size: 20),
+                const SizedBox(width: AppSpacing.sm),
+                const Text('Vibración', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w500)),
+                const Spacer(),
+                Switch(
+                  value: _hapticEnabled,
+                  onChanged: (v) { setState(() => _hapticEnabled = v); setSheet(() {}); },
+                  activeThumbColor: AppColors.primary,
+                  activeTrackColor: AppColors.primary,
+                  inactiveTrackColor: AppColors.border,
+                ),
+              ]),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -766,8 +878,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.menu_rounded, color: AppColors.textSecondary),
-          onPressed: () {},
+          icon: const Icon(Icons.logout_rounded, color: AppColors.textSecondary),
+          onPressed: () => _confirmExit(context),
         ),
         title: const Text('4 CARTAS BLITZ', style: TextStyle(
           color: AppColors.primary, fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: 2.5)),
@@ -775,7 +887,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_rounded, color: AppColors.textSecondary),
-            onPressed: () {},
+            onPressed: () => _openSettings(context),
           ),
         ],
       ),
@@ -982,6 +1094,9 @@ class _GameOverOverlay extends StatelessWidget {
 
     final String actionLabel = matchOver ? 'NUEVA PARTIDA' : 'SEGUIR';
     final VoidCallback actionTap = matchOver ? onNewMatch : onNextPartida;
+    final Color frameColor = tied
+        ? AppColors.warning
+        : playerWinsPartida ? AppColors.success : AppColors.danger;
 
     return Container(
       color: Colors.black.withValues(alpha: .90),
@@ -993,8 +1108,8 @@ class _GameOverOverlay extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppColors.surface,
               borderRadius: BorderRadius.circular(AppRadius.xl),
-              border: Border.all(color: AppColors.primary, width: 2),
-              boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .35), blurRadius: 48, spreadRadius: 4)],
+              border: Border.all(color: frameColor, width: 2),
+              boxShadow: [BoxShadow(color: frameColor.withValues(alpha: .35), blurRadius: 48, spreadRadius: 4)],
             ),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               // Match score dots
