@@ -425,8 +425,14 @@ class _ArenaScreenState extends State<ArenaScreen> {
   int? _swapOwnSlot;          // J/Q: selected own slot
   List<_KingTarget> _kingTargets = [];   // K: peeked targets (1 own + 1 opponent)
 
-  // ── game over ─────────────────────────────────────────────────────────────────
-  bool _gameOver = false;
+  // ── match (best of 3 partidas) ────────────────────────────────────────────────
+  int _playerPartidaWins = 0;
+  int _opponentPartidaWins = 0;
+  int _currentPartida = 1;
+
+  // ── partida over ─────────────────────────────────────────────────────────────
+  bool _partidaOver = false;
+  bool _matchOver = false;
 
   // ── opponent turn ─────────────────────────────────────────────────────────────
   bool _isOpponentTurn = false;
@@ -439,7 +445,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
   Color _bannerColor = AppColors.primary;
 
   @override
-  void initState() { super.initState(); _initRound(); }
+  void initState() { super.initState(); _initFullMatch(); }
 
   @override
   void dispose() {
@@ -451,7 +457,22 @@ class _ArenaScreenState extends State<ArenaScreen> {
 
   // ── Init ─────────────────────────────────────────────────────────────────────
 
-  void _initRound() {
+  void _initFullMatch() {
+    _opponentTimer?.cancel();
+    _peekHideTimer?.cancel();
+    _revealTimer?.cancel();
+    setState(() {
+      _playerPartidaWins = 0;
+      _opponentPartidaWins = 0;
+      _currentPartida = 1;
+      _partidaOver = false;
+      _matchOver = false;
+    });
+    _initPartida();
+  }
+
+  // Starts a fresh partida without resetting match score.
+  void _initPartida() {
     final cards = _buildFullDeck()..shuffle(_random);
     final pCards = List<GameCard>.from(cards.sublist(0, 4));
     final oCards = List<GameCard>.from(cards.sublist(4, 8));
@@ -474,37 +495,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
       _revealOwnSlot = null;
       _revealOpponentSlot = null;
       _isOpponentTurn = false;
-      _gameOver = false;
-    });
-  }
-
-  void _startNextRound() {
-    final rem = _roundsRemaining - 1;
-    if (rem <= 0) {
-      setState(() => _gameOver = true);
-      return;
-    }
-    final cards = _buildFullDeck()..shuffle(_random);
-    final pCards = List<GameCard>.from(cards.sublist(0, 4));
-    final oCards = List<GameCard>.from(cards.sublist(4, 8));
-    final firstDiscard = cards[8];
-    final deck = List<GameCard>.from(cards.sublist(9));
-    setState(() {
-      _playerCards = pCards;
-      _opponentCards = oCards;
-      _deck = deck;
-      _discardStack = [_DiscardEntry(firstDiscard, _rAngle(), _rOffset())];
-      _roundsRemaining = rem;
-      _phase = _Phase.peekInitial;
-      _drawnCard = null;
-      _initialPeekShowing = {};
-      _peeksUsed = 0;
-      _justSwappedSlots = {};
-      _swapOwnSlot = null;
-      _kingTargets = [];
-      _revealOwnSlot = null;
-      _revealOpponentSlot = null;
-      _isOpponentTurn = false;
+      _partidaOver = false;
     });
   }
 
@@ -512,13 +503,52 @@ class _ArenaScreenState extends State<ArenaScreen> {
   double _rAngle() => (_random.nextDouble() - 0.5) * 0.52;
   Offset _rOffset() => Offset((_random.nextDouble() - 0.5) * 14, (_random.nextDouble() - 0.5) * 10);
 
-  // ── End player turn (triggers opponent "thinking") ────────────────────────────
+  // ── End player turn → opponent thinks → ronda completes ───────────────────────
   void _endPlayerTurn() {
     _opponentTimer?.cancel();
     setState(() { _phase = _Phase.turn; _isOpponentTurn = true; });
     _opponentTimer = Timer(const Duration(milliseconds: 1800), () {
-      if (mounted) setState(() => _isOpponentTurn = false);
+      if (mounted) _onRoundComplete();
     });
+  }
+
+  // Called when both player and opponent have played one ronda.
+  void _onRoundComplete() {
+    final newRounds = _roundsRemaining - 1;
+    if (newRounds <= 0) {
+      setState(() { _isOpponentTurn = false; _roundsRemaining = 0; });
+      _endPartida();
+    } else {
+      setState(() { _isOpponentTurn = false; _roundsRemaining = newRounds; });
+    }
+  }
+
+  // Ends the current partida, scores it, checks match result.
+  void _endPartida() {
+    _opponentTimer?.cancel();
+    final playerScore = _playerCards.fold(0, (sum, c) => sum + c.value);
+    final opponentScore = _opponentCards.fold(0, (sum, c) => sum + c.value);
+    int newPlayerWins = _playerPartidaWins;
+    int newOpponentWins = _opponentPartidaWins;
+    if (playerScore < opponentScore) {
+      newPlayerWins++;
+    } else if (opponentScore < playerScore) {
+      newOpponentWins++;
+    }
+    final matchOver = newPlayerWins >= 2 || newOpponentWins >= 2 || _currentPartida >= 3;
+    setState(() {
+      _playerPartidaWins = newPlayerWins;
+      _opponentPartidaWins = newOpponentWins;
+      _isOpponentTurn = false;
+      _partidaOver = true;
+      _matchOver = matchOver;
+    });
+  }
+
+  // Starts the next partida in the match.
+  void _startNextPartida() {
+    setState(() => _currentPartida += 1);
+    _initPartida();
   }
 
   // ── Banner ───────────────────────────────────────────────────────────────────
@@ -595,7 +625,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
     _opponentTimer?.cancel();
     setState(() => _isOpponentTurn = true);
     _opponentTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) { setState(() => _isOpponentTurn = false); _startNextRound(); }
+      if (mounted) { setState(() => _isOpponentTurn = false); _endPartida(); }
     });
   }
 
@@ -771,7 +801,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
                 },
               ),
               const SizedBox(height: AppSpacing.sm),
-              _RoundsBadge(remaining: _roundsRemaining),
+              _RoundsBadge(remaining: _roundsRemaining, currentPartida: _currentPartida, playerWins: _playerPartidaWins, opponentWins: _opponentPartidaWins),
               const SizedBox(height: AppSpacing.xs),
               _PhaseHint(
                 phase: _phase, peeksUsed: _peeksUsed,
@@ -831,13 +861,18 @@ class _ArenaScreenState extends State<ArenaScreen> {
             color: _bannerColor,
           ),
         ),
-        // Game over overlay
-        if (_gameOver)
+        // Partida over overlay
+        if (_partidaOver)
           Positioned.fill(
             child: _GameOverOverlay(
               playerCards: _playerCards,
               opponentCards: _opponentCards,
-              onPlayAgain: _initRound,
+              playerPartidaWins: _playerPartidaWins,
+              opponentPartidaWins: _opponentPartidaWins,
+              currentPartida: _currentPartida,
+              matchOver: _matchOver,
+              onNextPartida: _startNextPartida,
+              onNewMatch: _initFullMatch,
               onExit: () => Navigator.of(context).pop(),
             ),
           ),
@@ -851,20 +886,26 @@ class _ArenaScreenState extends State<ArenaScreen> {
 class _GameOverOverlay extends StatelessWidget {
   final List<GameCard> playerCards;
   final List<GameCard> opponentCards;
-  final VoidCallback onPlayAgain;
+  final int playerPartidaWins;
+  final int opponentPartidaWins;
+  final int currentPartida;
+  final bool matchOver;
+  final VoidCallback onNextPartida;
+  final VoidCallback onNewMatch;
   final VoidCallback onExit;
 
   const _GameOverOverlay({
     required this.playerCards, required this.opponentCards,
-    required this.onPlayAgain, required this.onExit,
+    required this.playerPartidaWins, required this.opponentPartidaWins,
+    required this.currentPartida, required this.matchOver,
+    required this.onNextPartida, required this.onNewMatch, required this.onExit,
   });
 
   int _score(List<GameCard> cards) => cards.fold(0, (sum, c) => sum + c.value);
 
   Widget _cardCol(GameCard card) {
-    final isJoker = card.isJoker;
-    final valLabel = isJoker ? '−2' : '${card.value}';
-    final valColor = isJoker ? AppColors.cardInkJoker : AppColors.textPrimary;
+    final valLabel = card.isJoker ? '−2' : '${card.value}';
+    final valColor = card.isJoker ? AppColors.cardInkJoker : AppColors.textPrimary;
     return Column(mainAxisSize: MainAxisSize.min, children: [
       _CardFace(card: card, width: 58),
       const SizedBox(height: 5),
@@ -872,14 +913,45 @@ class _GameOverOverlay extends StatelessWidget {
     ]);
   }
 
+  Widget _winDot(bool filled) => Container(
+    width: 10, height: 10,
+    margin: const EdgeInsets.symmetric(horizontal: 3),
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: filled ? AppColors.primary : Colors.transparent,
+      border: Border.all(color: AppColors.primary, width: 1.5),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final playerScore = _score(playerCards);
     final opponentScore = _score(opponentCards);
-    final playerWins = playerScore <= opponentScore;
+    final playerWinsPartida = playerScore < opponentScore;
+    final tied = playerScore == opponentScore;
+
+    final String resultLabel;
+    final Color resultColor;
+    if (tied) {
+      resultLabel = 'EMPATE en esta partida';
+      resultColor = AppColors.warning;
+    } else if (playerWinsPartida) {
+      resultLabel = matchOver
+          ? (playerPartidaWins >= 2 ? '¡GANASTE EL MATCH!' : '¡Ganaste esta partida!')
+          : '¡Ganaste esta partida!';
+      resultColor = AppColors.success;
+    } else {
+      resultLabel = matchOver
+          ? (opponentPartidaWins >= 2 ? 'El rival ganó el match' : 'El rival ganó esta partida')
+          : 'El rival ganó esta partida';
+      resultColor = AppColors.danger;
+    }
+
+    final String actionLabel = matchOver ? 'NUEVA PARTIDA' : 'SIGUIENTE PARTIDA';
+    final VoidCallback actionTap = matchOver ? onNewMatch : onNextPartida;
 
     return Container(
-      color: Colors.black.withValues(alpha: .88),
+      color: Colors.black.withValues(alpha: .90),
       child: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.xl),
@@ -892,19 +964,26 @@ class _GameOverOverlay extends StatelessWidget {
               boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .35), blurRadius: 48, spreadRadius: 4)],
             ),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text('¡FIN DE LA PARTIDA!', style: TextStyle(
-                  color: AppColors.primary, fontSize: 20,
-                  fontWeight: FontWeight.w800, letterSpacing: 2.5)),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                playerWins ? '¡GANASTE! 🏆' : 'El rival ganó esta vez',
-                style: TextStyle(
-                  color: playerWins ? AppColors.success : AppColors.danger,
-                  fontSize: 14, fontWeight: FontWeight.w600),
-              ),
+              // Match score dots
+              Text('PARTIDA $currentPartida DE 3', style: AppText.label.copyWith(letterSpacing: 1.5)),
+              const SizedBox(height: AppSpacing.sm),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text('TÚ  ', style: AppText.caption),
+                Row(children: List.generate(2, (i) => _winDot(i < playerPartidaWins))),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                  child: Text('vs', style: AppText.caption),
+                ),
+                Row(children: List.generate(2, (i) => _winDot(i < opponentPartidaWins))),
+                Text('  RIVAL', style: AppText.caption),
+              ]),
+              const SizedBox(height: AppSpacing.base),
+              Text(resultLabel, style: TextStyle(
+                  color: resultColor, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 1)),
+
               const SizedBox(height: AppSpacing.xl2),
 
-              // Player cards
+              // Player cards + score
               Text('TUS CARTAS', style: AppText.label),
               const SizedBox(height: AppSpacing.sm),
               Row(
@@ -926,12 +1005,12 @@ class _GameOverOverlay extends StatelessWidget {
                   Text('$playerScore', style: TextStyle(
                       color: AppColors.primary, fontSize: 44,
                       fontWeight: FontWeight.w800, fontFeatures: const [FontFeature.tabularFigures()])),
-                  Text('(cuanto más bajo, mejor)', style: AppText.caption),
+                  Text('cuanto más bajo, mejor', style: AppText.caption),
                 ]),
               ),
-              const SizedBox(height: AppSpacing.xl),
+              const SizedBox(height: AppSpacing.base),
 
-              // Opponent cards (collapsed, smaller)
+              // Opponent summary
               Container(
                 padding: const EdgeInsets.all(AppSpacing.base),
                 decoration: BoxDecoration(
@@ -970,7 +1049,7 @@ class _GameOverOverlay extends StatelessWidget {
                 )),
                 const SizedBox(width: AppSpacing.md),
                 Expanded(child: GestureDetector(
-                  onTap: onPlayAgain,
+                  onTap: actionTap,
                   child: Container(
                     height: 52,
                     decoration: BoxDecoration(
@@ -978,7 +1057,7 @@ class _GameOverOverlay extends StatelessWidget {
                       borderRadius: BorderRadius.circular(AppRadius.md),
                       boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: .4), blurRadius: 14)],
                     ),
-                    child: const Center(child: Text('JUGAR DE NUEVO', style: TextStyle(
+                    child: Center(child: Text(actionLabel, style: const TextStyle(
                         color: AppColors.bgDeepest, fontWeight: FontWeight.w800,
                         fontSize: 12, letterSpacing: 0.8))),
                   ),
@@ -1088,26 +1167,50 @@ class _OpponentSection extends StatelessWidget {
 
 class _RoundsBadge extends StatelessWidget {
   final int remaining;
-  const _RoundsBadge({required this.remaining});
+  final int currentPartida;
+  final int playerWins;
+  final int opponentWins;
+  const _RoundsBadge({required this.remaining, required this.currentPartida, required this.playerWins, required this.opponentWins});
+
+  Widget _dot(bool filled) => Container(
+    width: 9, height: 9,
+    margin: const EdgeInsets.symmetric(horizontal: 2),
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: filled ? AppColors.primary : Colors.transparent,
+      border: Border.all(color: AppColors.primary, width: 1.5),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     const purple = AppColors.cardInkJoker;
     final isLast = remaining == 1;
-    final label = isLast ? '⚡ ÚLTIMA RONDA ⚡' : 'RONDAS RESTANTES: $remaining';
-    final color = isLast ? AppColors.danger : purple;
+    final roundLabel = isLast ? '⚡ ÚLTIMA RONDA ⚡' : 'RONDAS: $remaining';
+    final roundColor = isLast ? AppColors.danger : purple;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.xs + 2),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        border: Border.all(color: color, width: 1.5),
-        boxShadow: [BoxShadow(color: color.withValues(alpha: .28), blurRadius: 14)],
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      // Match score
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Text('PARTIDA $currentPartida/3  ', style: AppText.caption.copyWith(letterSpacing: 1)),
+        Row(children: List.generate(2, (i) => _dot(i < playerWins))),
+        Text('  vs  ', style: AppText.caption),
+        Row(children: List.generate(2, (i) => _dot(i < opponentWins))),
+      ]),
+      const SizedBox(height: 4),
+      // Ronda badge
+      AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.xs + 2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          border: Border.all(color: roundColor, width: 1.5),
+          boxShadow: [BoxShadow(color: roundColor.withValues(alpha: .28), blurRadius: 14)],
+        ),
+        child: Text(roundLabel, style: TextStyle(
+            color: roundColor, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
       ),
-      child: Text(label, style: TextStyle(
-          color: color, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
-    );
+    ]);
   }
 }
 
