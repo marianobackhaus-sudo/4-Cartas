@@ -428,6 +428,9 @@ class _ArenaScreenState extends State<ArenaScreen> {
   // ── espejo penalty ────────────────────────────────────────────────────────────
   int _playerPenalty = 0;
 
+  // ── cut pending (announced during cardDrawn) ──────────────────────────────────
+  bool _cutPending = false;
+
   // ── match (best of 3 partidas) ────────────────────────────────────────────────
   int _playerPartidaWins = 0;
   int _opponentPartidaWins = 0;
@@ -505,6 +508,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
       _isOpponentTurn = false;
       _partidaOver = false;
       _playerPenalty = 0;
+      _cutPending = false;
     });
   }
 
@@ -514,6 +518,17 @@ class _ArenaScreenState extends State<ArenaScreen> {
 
   // ── End player turn → opponent thinks → ronda completes ───────────────────────
   void _endPlayerTurn() {
+    if (_cutPending) {
+      // Player announced cut while holding drawn card — fire cut now
+      setState(() => _cutPending = false);
+      _showBanner('¡CORTE!', 'Última vuelta del rival', AppColors.danger, dur: const Duration(seconds: 2));
+      _opponentTimer?.cancel();
+      setState(() => _isOpponentTurn = true);
+      _opponentTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) { setState(() => _isOpponentTurn = false); _endPartida(); }
+      });
+      return;
+    }
     _opponentTimer?.cancel();
     setState(() { _phase = _Phase.turn; _isOpponentTurn = true; });
     _opponentTimer = Timer(const Duration(milliseconds: 1800), () {
@@ -630,6 +645,13 @@ class _ArenaScreenState extends State<ArenaScreen> {
 
   // ── Cut ──────────────────────────────────────────────────────────────────────
   void _handleCut() {
+    if (_phase == _Phase.cardDrawn) {
+      // Can't cut immediately — announce and fire after card is resolved
+      if (_cutPending) return;
+      setState(() => _cutPending = true);
+      _showBanner('¡CORTE!', 'Decidí qué hacer con tu carta', AppColors.danger, dur: const Duration(seconds: 2));
+      return;
+    }
     _showBanner('¡CORTE!', 'Última vuelta del rival', AppColors.danger, dur: const Duration(seconds: 2));
     _opponentTimer?.cancel();
     setState(() => _isOpponentTurn = true);
@@ -978,6 +1000,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
               _ActionBar(
                 phase: _phase,
                 isOpponentTurn: _isOpponentTurn,
+                cutPending: _cutPending,
                 onCut: _handleCut,
                 onMirror: _handleMirror,
                 onKingSwap: () => _kingDecide(true),
@@ -1561,14 +1584,16 @@ class _TableCenter extends StatelessWidget {
 class _ActionBar extends StatelessWidget {
   final _Phase phase;
   final bool isOpponentTurn;
+  final bool cutPending;
   final VoidCallback onCut;
   final VoidCallback onMirror;
   final VoidCallback onKingSwap;
   final VoidCallback onKingKeep;
 
   const _ActionBar({
-    required this.phase, required this.isOpponentTurn, required this.onCut,
-    required this.onMirror, required this.onKingSwap, required this.onKingKeep,
+    required this.phase, required this.isOpponentTurn, required this.cutPending,
+    required this.onCut, required this.onMirror,
+    required this.onKingSwap, required this.onKingKeep,
   });
 
   @override
@@ -1583,17 +1608,17 @@ class _ActionBar extends StatelessWidget {
 
     Widget child;
     if (phase == _Phase.powerKingDecide) {
-      // Three buttons: intercambiar | dejar | espejo
+      // Three buttons: cambiar | dejar | espejo
       child = Row(children: [
-        Expanded(child: _Btn(label: '¡CAMBIAR!', icon: Icons.swap_horiz_rounded, color: AppColors.primary, solid: true, onTap: onKingSwap)),
+        Expanded(child: _Btn(label: 'CAMBIAR', icon: Icons.swap_horiz_rounded, color: AppColors.primary, solid: true, onTap: onKingSwap)),
         const SizedBox(width: AppSpacing.sm),
         Expanded(child: _Btn(label: 'DEJAR', icon: Icons.close_rounded, color: AppColors.danger, solid: false, onTap: onKingKeep)),
         const SizedBox(width: AppSpacing.sm),
         espejoBtn,
       ]);
-    } else if (phase == _Phase.turn) {
+    } else if (phase == _Phase.turn || phase == _Phase.cardDrawn) {
       child = Row(children: [
-        Expanded(child: _Btn(label: 'CORTAR', icon: Icons.content_cut_rounded, color: AppColors.danger, solid: false, onTap: isOpponentTurn ? () {} : onCut, disabled: isOpponentTurn)),
+        Expanded(child: _Btn(label: 'CORTAR', icon: Icons.content_cut_rounded, color: AppColors.danger, solid: cutPending, onTap: isOpponentTurn ? () {} : onCut, disabled: isOpponentTurn)),
         const SizedBox(width: AppSpacing.md),
         espejoBtn,
       ]);
@@ -1634,11 +1659,14 @@ class _Btn extends StatelessWidget {
             border: Border.all(color: effectiveColor, width: 1.5),
             boxShadow: disabled ? [] : [BoxShadow(color: effectiveColor.withValues(alpha: .30), blurRadius: 12)],
           ),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, color: fg, size: 18),
-            const SizedBox(width: 8),
-            Text(label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1.1)),
-          ]),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(icon, color: fg, size: 18),
+              const SizedBox(width: 6),
+              Text(label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1.1)),
+            ]),
+          ),
         ),
       ),
     );
