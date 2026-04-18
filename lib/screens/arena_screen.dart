@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -14,13 +15,21 @@ class _Mock {
   static const int deckCount = 42;
   static const GameCard discardTop = GameCard.regular(Suit.clubs, 7);
 
-  static const List<GameCard?> playerHandCards = [
-    GameCard.regular(Suit.spades, 13), // K♠
-    null,
-    GameCard.regular(Suit.diamonds, 1), // A♦
-    null,
+  // Cartas reales del rival (ocultas — solo visibles al usar poder 9/10)
+  static const List<GameCard> opponentCards = [
+    GameCard.regular(Suit.hearts, 5),
+    GameCard.regular(Suit.diamonds, 3),
+    GameCard.regular(Suit.spades, 8),
+    GameCard.regular(Suit.clubs, 2),
   ];
-  static const List<bool> playerHandRevealed = [true, false, true, false];
+
+  // Cartas del jugador (ocultas — se pekan 2 al inicio, luego quedan boca abajo)
+  static const List<GameCard> playerCards = [
+    GameCard.regular(Suit.spades, 13), // K♠
+    GameCard.regular(Suit.hearts, 9),  // desconocida
+    GameCard.regular(Suit.diamonds, 1), // A♦
+    GameCard.regular(Suit.clubs, 6),   // desconocida
+  ];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -81,7 +90,8 @@ class _CardFace extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(color: AppColors.cardFaceEdge),
         boxShadow: const [
-          BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
+          BoxShadow(
+              color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
         ],
       ),
       child: Stack(children: [
@@ -134,66 +144,133 @@ class _CornerLabel extends StatelessWidget {
 
 // ─── Card Back ────────────────────────────────────────────────────────────────
 
+/// eyeActive: muestra el ojo grande en el centro (poder activo).
+/// borderColor: nulo = borde estándar.
 class _CardBack extends StatelessWidget {
   final double width;
-  final Color? glowColor;
-  final bool showEye;
+  final Color? borderColor;
+  final bool eyeActive;
+  final Color eyeColor;
+  final VoidCallback? onTap;
 
-  const _CardBack({this.width = 72, this.glowColor, this.showEye = false});
+  const _CardBack({
+    this.width = 72,
+    this.borderColor,
+    this.eyeActive = false,
+    this.eyeColor = AppColors.accent,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final h = width / AppCardDims.aspectRatio;
-    final glow = glowColor;
+    final bc = borderColor ?? (eyeActive ? eyeColor : AppColors.border);
+    final bw = eyeActive ? 1.5 : 1.0;
 
-    return Container(
-      width: width,
-      height: h,
-      decoration: BoxDecoration(
-        color: AppColors.cardBack,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(
-          color: glow ?? AppColors.border,
-          width: glow != null ? 1.5 : 1.0,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: width,
+        height: h,
+        decoration: BoxDecoration(
+          color: AppColors.cardBack,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          border: Border.all(color: bc, width: bw),
+          boxShadow: [
+            const BoxShadow(
+                color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
+            if (eyeActive)
+              BoxShadow(
+                  color: eyeColor.withValues(alpha: 0.40),
+                  blurRadius: 18,
+                  spreadRadius: 2),
+          ],
         ),
-        boxShadow: [
-          const BoxShadow(
-              color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
-          if (glow != null)
-            BoxShadow(
-                color: glow.withValues(alpha: 0.35), blurRadius: 16, spreadRadius: 1),
-        ],
+        child: eyeActive
+            ? Center(
+                child: Icon(
+                  Icons.visibility_outlined,
+                  color: eyeColor,
+                  size: width * 0.46,
+                ),
+              )
+            : null,
       ),
-      child: Stack(children: [
-        Center(
-          child: Icon(
-            Icons.layers_rounded,
-            color: AppColors.cardBackPattern.withValues(alpha: 0.45),
-            size: width * 0.42,
-          ),
-        ),
-        if (showEye)
-          Positioned(
-            top: 7,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Icon(
-                Icons.visibility_outlined,
-                color: (glow ?? AppColors.textMuted).withValues(alpha: 0.85),
-                size: 13,
-              ),
-            ),
-          ),
-      ]),
     );
   }
 }
 
 // ─── Arena Screen ─────────────────────────────────────────────────────────────
 
-class ArenaScreen extends StatelessWidget {
+class ArenaScreen extends StatefulWidget {
   const ArenaScreen({super.key});
+
+  @override
+  State<ArenaScreen> createState() => _ArenaScreenState();
+}
+
+class _ArenaScreenState extends State<ArenaScreen> {
+  // Poder 9/10: espiar carta rival
+  bool _opponentPeekActive = false;
+  int? _revealingOpponentSlot;
+
+  // Poder 7/8: espiar carta propia
+  bool _playerPeekActive = false;
+  int? _revealingPlayerSlot;
+
+  Timer? _revealTimer;
+
+  @override
+  void dispose() {
+    _revealTimer?.cancel();
+    super.dispose();
+  }
+
+  void _activateOpponentPeek() {
+    _revealTimer?.cancel();
+    setState(() {
+      _opponentPeekActive = true;
+      _playerPeekActive = false;
+      _revealingOpponentSlot = null;
+      _revealingPlayerSlot = null;
+    });
+  }
+
+  void _activatePlayerPeek() {
+    _revealTimer?.cancel();
+    setState(() {
+      _playerPeekActive = true;
+      _opponentPeekActive = false;
+      _revealingOpponentSlot = null;
+      _revealingPlayerSlot = null;
+    });
+  }
+
+  void _onTapOpponentCard(int i) {
+    if (!_opponentPeekActive) return;
+    _revealTimer?.cancel();
+    setState(() {
+      _revealingOpponentSlot = i;
+      _opponentPeekActive = false; // poder consumido
+    });
+    _revealTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() => _revealingOpponentSlot = null);
+    });
+  }
+
+  void _onTapPlayerCard(int i) {
+    if (!_playerPeekActive) return;
+    _revealTimer?.cancel();
+    setState(() {
+      _revealingPlayerSlot = i;
+      _playerPeekActive = false; // poder consumido
+    });
+    _revealTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() => _revealingPlayerSlot = null);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -204,8 +281,7 @@ class ArenaScreen extends StatelessWidget {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon:
-              const Icon(Icons.menu_rounded, color: AppColors.textSecondary),
+          icon: const Icon(Icons.menu_rounded, color: AppColors.textSecondary),
           onPressed: () {},
         ),
         title: const Text(
@@ -239,15 +315,30 @@ class ArenaScreen extends StatelessWidget {
         child: SafeArea(
           child: Column(
             children: [
-              const _OpponentSection(),
+              _OpponentSection(
+                peekActive: _opponentPeekActive,
+                revealingSlot: _revealingOpponentSlot,
+                onTapCard: _onTapOpponentCard,
+              ),
               const SizedBox(height: AppSpacing.base),
               const _RoundsBadge(),
+              const SizedBox(height: AppSpacing.sm),
+              _PowerDemoBar(
+                onPeekOpponent: _activateOpponentPeek,
+                onPeekOwn: _activatePlayerPeek,
+                opponentPeekActive: _opponentPeekActive,
+                playerPeekActive: _playerPeekActive,
+              ),
               const Spacer(),
               const _TableCenter(),
               const SizedBox(height: AppSpacing.base),
               const _ActionButtons(),
               const SizedBox(height: AppSpacing.xl),
-              const _PlayerHand(),
+              _PlayerHand(
+                peekActive: _playerPeekActive,
+                revealingSlot: _revealingPlayerSlot,
+                onTapCard: _onTapPlayerCard,
+              ),
               const SizedBox(height: AppSpacing.lg),
             ],
           ),
@@ -260,7 +351,15 @@ class ArenaScreen extends StatelessWidget {
 // ─── Opponent Section ─────────────────────────────────────────────────────────
 
 class _OpponentSection extends StatelessWidget {
-  const _OpponentSection();
+  final bool peekActive;
+  final int? revealingSlot;
+  final void Function(int) onTapCard;
+
+  const _OpponentSection({
+    required this.peekActive,
+    required this.revealingSlot,
+    required this.onTapCard,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -316,14 +415,25 @@ class _OpponentSection extends StatelessWidget {
         const SizedBox(height: AppSpacing.md),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(
-            4,
-            (i) => Padding(
+          children: List.generate(4, (i) {
+            final isRevealing = revealingSlot == i;
+            return Padding(
               padding:
                   const EdgeInsets.symmetric(horizontal: AppSpacing.xs + 1),
-              child: const _CardBack(width: 68),
-            ),
-          ),
+              child: isRevealing
+                  ? _CardFace(
+                      card: _Mock.opponentCards[i],
+                      width: 68,
+                    )
+                  : _CardBack(
+                      width: 68,
+                      eyeActive: peekActive,
+                      // dorado para el poder de espiar rival
+                      eyeColor: AppColors.warning,
+                      onTap: peekActive ? () => onTapCard(i) : null,
+                    ),
+            );
+          }),
         ),
       ]),
     );
@@ -364,6 +474,103 @@ class _RoundsBadge extends StatelessWidget {
   }
 }
 
+// ─── Power Demo Bar ───────────────────────────────────────────────────────────
+
+class _PowerDemoBar extends StatelessWidget {
+  final VoidCallback onPeekOpponent;
+  final VoidCallback onPeekOwn;
+  final bool opponentPeekActive;
+  final bool playerPeekActive;
+
+  const _PowerDemoBar({
+    required this.onPeekOpponent,
+    required this.onPeekOwn,
+    required this.opponentPeekActive,
+    required this.playerPeekActive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text('DEMO  ',
+              style: AppText.caption.copyWith(
+                  fontSize: 10,
+                  letterSpacing: 1.2,
+                  fontWeight: FontWeight.w700)),
+          _DemoChip(
+            label: '9/10: espiar rival',
+            icon: Icons.visibility_outlined,
+            color: AppColors.warning,
+            active: opponentPeekActive,
+            onTap: onPeekOpponent,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          _DemoChip(
+            label: '7/8: espiar propio',
+            icon: Icons.visibility_outlined,
+            color: AppColors.accent,
+            active: playerPeekActive,
+            onTap: onPeekOwn,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DemoChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _DemoChip({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: active ? color.withValues(alpha: 0.18) : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          border: Border.all(
+            color: active ? color : AppColors.border,
+            width: active ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon,
+              color: active ? color : AppColors.textMuted, size: 11),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: active ? color : AppColors.textMuted,
+              fontSize: 10,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
 // ─── Table Center ─────────────────────────────────────────────────────────────
 
 class _TableCenter extends StatelessWidget {
@@ -375,7 +582,6 @@ class _TableCenter extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        // Draw pile
         Column(children: [
           Stack(clipBehavior: Clip.none, children: [
             const _CardBack(width: 100),
@@ -410,7 +616,6 @@ class _TableCenter extends StatelessWidget {
           Text('MAZO', style: AppText.caption),
         ]),
         const SizedBox(width: AppSpacing.xl2 + AppSpacing.base),
-        // Discard pile
         Column(children: [
           _CardFace(card: _Mock.discardTop, width: 100),
           const SizedBox(height: AppSpacing.sm),
@@ -432,8 +637,7 @@ class _ActionButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding:
-          const EdgeInsets.symmetric(horizontal: AppSpacing.base),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.base),
       child: Row(children: [
         Expanded(
           child: _GameButton(
@@ -518,43 +722,37 @@ class _GameButton extends StatelessWidget {
 // ─── Player Hand ─────────────────────────────────────────────────────────────
 
 class _PlayerHand extends StatelessWidget {
-  const _PlayerHand();
+  final bool peekActive;
+  final int? revealingSlot;
+  final void Function(int) onTapCard;
+
+  const _PlayerHand({
+    required this.peekActive,
+    required this.revealingSlot,
+    required this.onTapCard,
+  });
 
   @override
   Widget build(BuildContext context) {
     const purple = AppColors.cardInkJoker;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(4, (i) {
-        final card = _Mock.playerHandCards[i];
-        final revealed = _Mock.playerHandRevealed[i];
+        final isRevealing = revealingSlot == i;
         return Padding(
           padding:
               const EdgeInsets.symmetric(horizontal: AppSpacing.xs + 1),
-          child: Stack(clipBehavior: Clip.none, children: [
-            if (revealed && card != null)
-              _CardFace(card: card, width: 72)
-            else
-              const _CardBack(
-                width: 72,
-                glowColor: purple,
-                showEye: true,
-              ),
-            // eye icon on revealed cards too (subtle)
-            if (revealed && card != null)
-              Positioned(
-                top: 7,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Icon(
-                    Icons.visibility_outlined,
-                    color: AppColors.accent.withValues(alpha: 0.6),
-                    size: 12,
-                  ),
+          child: isRevealing
+              ? _CardFace(card: _Mock.playerCards[i], width: 72)
+              : _CardBack(
+                  width: 72,
+                  // borde púrpura permanente para identificar las cartas propias
+                  borderColor: peekActive ? AppColors.accent : purple,
+                  eyeActive: peekActive,
+                  eyeColor: AppColors.accent,
+                  onTap: peekActive ? () => onTapCard(i) : null,
                 ),
-              ),
-          ]),
         );
       }),
     );
