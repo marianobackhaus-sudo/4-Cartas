@@ -138,19 +138,23 @@ GameState _applyCut(GameState state, Cut action) {
   _requireTurn(state, action.uid);
   _requirePhase(state, const {GamePhase.turn});
   _requireNoPending(state);
-  if (state.drawnCard != null) {
-    throw const GameError(
-      GameErrorCode.cannotCutNow,
-      'Cannot cut while holding a drawn card',
-    );
-  }
   if (state.cutterId != null) {
     throw const GameError(
       GameErrorCode.cannotCutNow,
       'Round already has a cutter',
     );
   }
-  // Set cutter, enter awaitingLastTurn, pass turn to the opponent for their last move.
+  if (state.cutPending) {
+    throw const GameError(
+      GameErrorCode.cannotCutNow,
+      'Cut already pending',
+    );
+  }
+  // If holding a drawn card, defer the cut until the card is resolved.
+  if (state.drawnCard != null) {
+    return state.copyWith(cutPending: true);
+  }
+  // Normal cut: no drawn card → enter awaitingLastTurn immediately.
   return _flipTurn(
     state.copyWith(
       cutterId: action.uid,
@@ -383,6 +387,7 @@ GameState startNextRound({
     lastDiscardRank: null,
     lastDiscardBy: null,
     mirrorPenalty: {for (final uid in state.seatOrder) uid: 0},
+    cutPending: false,
   );
 }
 
@@ -444,6 +449,7 @@ GameState startNextGame({
     lastDiscardRank: starter.isJoker ? null : starter.rank,
     lastDiscardBy: null,
     mirrorPenalty: zeros,
+    cutPending: false,
   );
 }
 
@@ -505,6 +511,16 @@ GameState afterTurnEnd(GameState state) {
       state.turnPlayerId != state.cutterId) {
     // The non-cutter just finished their last turn — enter reveal phase.
     return state.copyWith(phase: GamePhase.reveal);
+  }
+  // Fire a deferred cut now that the drawn card has been resolved.
+  if (state.cutPending) {
+    return _flipTurn(
+      state.copyWith(
+        cutPending: false,
+        cutterId: state.turnPlayerId,
+        phase: GamePhase.awaitingLastTurn,
+      ),
+    );
   }
   return _flipTurn(state);
 }

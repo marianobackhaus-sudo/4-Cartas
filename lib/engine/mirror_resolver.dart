@@ -11,18 +11,17 @@ import 'models/player_state.dart';
 /// Rules:
 /// - Any player can attempt a mirror at any time during active play,
 ///   regardless of whose turn it is. Does NOT change `turnPlayerId`.
-/// - Requires `state.lastDiscardRank != null` (there's a top discard to match).
-/// - If the slot's card rank matches `lastDiscardRank`:
-///     → slot is removed (hand shrinks). Slot's card goes to the top of discard
-///       (becoming the new lastDiscard).
-/// - If it does NOT match (penalty):
-///     → hand stays untouched (cards stay hidden).
-///     → `mirrorPenalty[uid]` is increased by 5 points. Added to the
-///       player's score at round reveal.
-/// - Jokers cannot be mirrored (rank sentinel 0, never matches discard).
+/// - Requires a valid top-of-discard card to match against.
+/// - If the slot's card rank matches `lastDiscardRank` (or Joker vs Joker):
+///     → ALL cards of that rank are removed (hand shrinks). Those cards go
+///       to the top of discard (lastDiscard updates to the removed rank).
+/// - If there is NO matching card in hand (penalty):
+///     → hand stays untouched.
+///     → `mirrorPenalty[uid]` is increased by 5 points.
+/// - Special rule: if the top of discard is a Joker, only a Joker in hand
+///   counts as a match.
 /// - Allowed phases: turn, awaitingLastTurn. Not allowed during peekInitial,
-///   reveal, roundEnd, gameEnd, matchEnd, or while a `pending` power is active
-///   (to avoid conflicting with the discarder's power resolution).
+///   reveal, roundEnd, gameEnd, matchEnd, or while a `pending` power is active.
 GameState resolveMirror(GameState state, MirrorAttempt action) {
   if (state.phase != GamePhase.turn && state.phase != GamePhase.awaitingLastTurn) {
     throw GameError(
@@ -36,8 +35,13 @@ GameState resolveMirror(GameState state, MirrorAttempt action) {
       'Mirror blocked while a power is pending',
     );
   }
+
   final lastRank = state.lastDiscardRank;
-  if (lastRank == null) {
+  final topIsJoker = lastRank == null &&
+      state.discard.isNotEmpty &&
+      state.discard.last.isJoker;
+
+  if (lastRank == null && !topIsJoker) {
     throw const GameError(
       GameErrorCode.invalidAction,
       'No discard to mirror against',
@@ -51,41 +55,59 @@ GameState resolveMirror(GameState state, MirrorAttempt action) {
   }
 
   final player = state.player(action.uid);
-  if (action.slotIndex < 0 || action.slotIndex >= player.slots.length) {
+  if (player.slots.isEmpty) {
     throw const GameError(
-      GameErrorCode.invalidSlot,
-      'slotIndex out of range',
+      GameErrorCode.invalidAction,
+      'No cards to mirror',
     );
   }
 
-  final slot = player.slots[action.slotIndex];
-  final slotCard = slot.card;
+  // Find ALL slots that match the top of discard.
+  final List<int> matchingSlots;
+  if (topIsJoker) {
+    matchingSlots = [
+      for (var i = 0; i < player.slots.length; i++)
+        if (player.slots[i].card.isJoker) i,
+    ];
+  } else {
+    matchingSlots = [
+      for (var i = 0; i < player.slots.length; i++)
+        if (!player.slots[i].card.isJoker && player.slots[i].card.rank == lastRank) i,
+    ];
+  }
 
-  if (!slotCard.isJoker && slotCard.rank == lastRank) {
-    return _applyMirrorMatch(state, action.uid, action.slotIndex, slotCard);
+  if (matchingSlots.isNotEmpty) {
+    return _applyMirrorMatch(state, action.uid, matchingSlots);
   }
   return _applyMirrorMiss(state, action.uid);
 }
 
-// ── Match: slot removed, card → discard top ──────────────────────────────────
+// ── Match: ALL matching slots removed, cards → discard top ───────────────────
 
 GameState _applyMirrorMatch(
   GameState state,
   String uid,
-  int slotIndex,
-  GameCard removedCard,
+  List<int> matchSlots,
 ) {
   final player = state.player(uid);
-  final newSlots = List<HandSlot>.of(player.slots)..removeAt(slotIndex);
+  final removedCards = matchSlots.map((i) => player.slots[i].card).toList();
+
+  // Remove slots in descending index order to preserve lower indices.
+  final newSlots = List<HandSlot>.of(player.slots);
+  for (final i in (matchSlots.toList()..sort((a, b) => b.compareTo(a)))) {
+    newSlots.removeAt(i);
+  }
+
   final newPlayers = Map<String, PlayerState>.of(state.players)
     ..[uid] = player.copyWith(slots: newSlots);
 
-  final newDiscard = List<GameCard>.of(state.discard)..add(removedCard);
+  final newDiscard = List<GameCard>.of(state.discard)..addAll(removedCards);
+  final topRemoved = removedCards.last;
 
   return state.copyWith(
     players: newPlayers,
     discard: newDiscard,
-    lastDiscardRank: removedCard.isJoker ? null : removedCard.rank,
+    lastDiscardRank: topRemoved.isJoker ? null : topRemoved.rank,
     lastDiscardBy: uid,
   );
 }

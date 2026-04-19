@@ -701,11 +701,8 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
 
   // ── Mirror ─────────────────────────────────────────────────────────────────
 
-  /// Auto-mirror: scan own hand for a card matching the top of the discard
-  /// pile. If one exists, dispatch a mirror for that slot (engine removes it
-  /// + pushes it to discard). If nothing matches, dispatch on slot 0 so the
-  /// engine registers a miss → +5 penalty. Can be tapped at any time by either
-  /// player.
+  /// Mirror: engine finds all matching cards and removes them. The player just
+  /// taps ESPEJO — no slot selection needed.
   Future<void> _handleMirror(GameState g, String myUid) async {
     final mySlots = g.player(myUid).slots;
     if (mySlots.isEmpty) return;
@@ -724,32 +721,27 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
     }
 
     final lastRank = g.lastDiscardRank;
-    final lastIsJoker =
-        g.discard.isNotEmpty && g.discard.last.isJoker;
-    if (lastRank == null) {
-      _showBanner(
-        'ESPEJO NO DISPONIBLE',
-        lastIsJoker
-            ? 'Último descarte es un joker'
-            : 'No hay carta en el descarte',
-        AppColors.warning,
-      );
+    final topIsJoker = lastRank == null &&
+        g.discard.isNotEmpty &&
+        g.discard.last.isJoker;
+    if (lastRank == null && !topIsJoker) {
+      _showBanner('ESPEJO NO DISPONIBLE',
+          'No hay carta en el descarte', AppColors.warning);
       return;
     }
 
-    int? matchSlot;
-    for (var i = 0; i < mySlots.length; i++) {
-      final c = mySlots[i].card;
-      if (!c.isJoker && c.rank == lastRank) {
-        matchSlot = i;
-        break;
-      }
+    // Determine locally whether a match exists (for banner only; engine is authoritative).
+    bool hasMatch;
+    if (topIsJoker) {
+      hasMatch = mySlots.any((s) => s.card.isJoker);
+    } else {
+      hasMatch = mySlots.any((s) => !s.card.isJoker && s.card.rank == lastRank);
     }
-    final isMatch = matchSlot != null;
-    final slot = matchSlot ?? 0;
-    final ok = await _runAction(() => _ctrl().mirrorAttempt(myUid, slot));
+
+    // slotIndex is ignored by the engine — pass 0 as a placeholder.
+    final ok = await _runAction(() => _ctrl().mirrorAttempt(myUid, 0));
     if (!ok) return;
-    if (isMatch) {
+    if (hasMatch) {
       _showBanner('¡ESPEJO!', 'Carta al descarte', AppColors.success);
     } else {
       _showBanner('¡FALLASTE!', '+5 puntos de penalidad', AppColors.danger);
@@ -1006,6 +998,9 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
         game.phase == GamePhase.gameEnd || game.phase == GamePhase.matchEnd;
     final matchOver = game.phase == GamePhase.matchEnd;
     final isHost = room.hostId == myUid;
+    // Accumulated totals from the engine (penalty already included in roundPoints).
+    final myTotalScore = game.roundPoints[myUid] ?? 0;
+    final oppTotalScore = game.roundPoints[oppUid] ?? 0;
 
     return Stack(children: [
       Container(
@@ -1071,7 +1066,7 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
             _ActionBar(
               phase: phase,
               isOpponentTurn: isOpponentTurn,
-              cutPending: false,
+              cutPending: game.cutPending,
               onCut: () => _handleCut(myUid),
               onMirror: () => _handleMirror(game, myUid),
               onKingSwap: () => _kingDecide(true, game, myUid),
@@ -1117,12 +1112,12 @@ class _ArenaScreenState extends ConsumerState<ArenaScreen> {
         Positioned.fill(
           child: _GameOverOverlay(
             playerCards: myCards,
-            opponentCards: oppCards,
+            playerTotalScore: myTotalScore,
+            opponentTotalScore: oppTotalScore,
             playerPartidaWins: myWins,
             opponentPartidaWins: oppWins,
             currentPartida: currentPartida,
             matchOver: matchOver,
-            playerPenalty: game.mirrorPenalty[myUid] ?? 0,
             onNextPartida: isHost
                 ? () => _runAction(() => _ctrl().nextGame())
                 : () {},
@@ -1171,25 +1166,28 @@ class _CoinStackIcon extends StatelessWidget {
 
 class _GameOverOverlay extends StatelessWidget {
   final List<GameCard> playerCards;
-  final List<GameCard> opponentCards;
+  final int playerTotalScore;
+  final int opponentTotalScore;
   final int playerPartidaWins;
   final int opponentPartidaWins;
   final int currentPartida;
   final bool matchOver;
-  final int playerPenalty;
   final VoidCallback onNextPartida;
   final VoidCallback onNewMatch;
   final VoidCallback onExit;
 
   const _GameOverOverlay({
-    required this.playerCards, required this.opponentCards,
-    required this.playerPartidaWins, required this.opponentPartidaWins,
-    required this.currentPartida, required this.matchOver,
-    required this.playerPenalty,
-    required this.onNextPartida, required this.onNewMatch, required this.onExit,
+    required this.playerCards,
+    required this.playerTotalScore,
+    required this.opponentTotalScore,
+    required this.playerPartidaWins,
+    required this.opponentPartidaWins,
+    required this.currentPartida,
+    required this.matchOver,
+    required this.onNextPartida,
+    required this.onNewMatch,
+    required this.onExit,
   });
-
-  int _score(List<GameCard> cards) => cards.fold(0, (sum, c) => sum + c.value);
 
   Widget _cardCol(GameCard card) {
     final valLabel = card.isJoker ? '−2' : '${card.value}';
@@ -1213,8 +1211,8 @@ class _GameOverOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final playerScore = _score(playerCards) + playerPenalty;
-    final opponentScore = _score(opponentCards);
+    final playerScore = playerTotalScore;
+    final opponentScore = opponentTotalScore;
     final playerWinsPartida = playerScore < opponentScore;
     final tied = playerScore == opponentScore;
 
@@ -1451,7 +1449,7 @@ class _OpponentSection extends StatelessWidget {
         const SizedBox(height: AppSpacing.sm),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(4, (i) {
+          children: List.generate(opponentCards.length, (i) {
             final isRevealing = revealingSlot == i;
             final isKingPeeked = kingPeekedSlots.contains(i);
             final showFace = isRevealing || isKingPeeked;
@@ -1564,9 +1562,13 @@ class _PhaseHint extends StatelessWidget {
         text = 'PODER: Ahora tocá una carta del RIVAL';
         color = AppColors.success;
       case _Phase.powerKingPeek:
-        if (!kingPickedOwn && !kingPickedOpp) text = 'REY: Tocá 1 tuya y 1 del rival';
-        else if (kingPickedOwn) text = 'REY: Ahora tocá 1 carta del RIVAL';
-        else text = 'REY: Ahora tocá 1 carta TUYA';
+        if (!kingPickedOwn && !kingPickedOpp) {
+          text = 'REY: Tocá 1 tuya y 1 del rival';
+        } else if (kingPickedOwn) {
+          text = 'REY: Ahora tocá 1 carta del RIVAL';
+        } else {
+          text = 'REY: Ahora tocá 1 carta TUYA';
+        }
         color = AppColors.primary;
       case _Phase.powerKingDecide:
         text = '¿Intercambiás estas 2 cartas?';

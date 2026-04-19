@@ -36,6 +36,10 @@ class GameState {
   /// round. Added to the player's score at reveal.
   final Map<String, int> mirrorPenalty;
 
+  /// True when a cut was announced while the player was holding a drawn card.
+  /// The cut fires automatically the moment the drawn card is resolved.
+  final bool cutPending;
+
   const GameState({
     required this.deck,
     required this.discard,
@@ -59,6 +63,7 @@ class GameState {
     this.lastDiscardRank,
     this.lastDiscardBy,
     this.mirrorPenalty = const {},
+    this.cutPending = false,
   });
 
   String opponentOf(String uid) => seatOrder.firstWhere((u) => u != uid);
@@ -88,6 +93,7 @@ class GameState {
     Object? lastDiscardRank = _sentinel,
     Object? lastDiscardBy = _sentinel,
     Map<String, int>? mirrorPenalty,
+    bool? cutPending,
   }) {
     return GameState(
       deck: deck ?? this.deck,
@@ -122,6 +128,7 @@ class GameState {
           ? this.lastDiscardBy
           : lastDiscardBy as String?,
       mirrorPenalty: mirrorPenalty ?? this.mirrorPenalty,
+      cutPending: cutPending ?? this.cutPending,
     );
   }
 
@@ -148,6 +155,7 @@ class GameState {
         'lastDiscardRank': lastDiscardRank,
         'lastDiscardBy': lastDiscardBy,
         'mirrorPenalty': mirrorPenalty,
+        'cutPending': cutPending,
       };
 
   factory GameState.fromJson(Map<String, dynamic> json) => GameState(
@@ -194,6 +202,7 @@ class GameState {
                   (k, v) => MapEntry(k, (v as num).toInt()),
                 ) ??
                 const {},
+        cutPending: (json['cutPending'] as bool?) ?? false,
       );
 }
 
